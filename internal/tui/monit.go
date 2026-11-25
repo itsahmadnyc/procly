@@ -613,6 +613,12 @@ func (m model) helpView() string {
 		lines = append(lines, "  "+sKey.Render(fmt.Sprintf("%-12s", r[0]))+sMuted.Render(r[1]))
 	}
 	lines = append(lines, "", "  "+sFaint.Render("press any key to close"))
+	if len(lines) > m.h {
+		lines = lines[:m.h]
+	}
+	for i, l := range lines {
+		lines[i] = ansi.Truncate(l, m.w, "…")
+	}
 	return strings.Join(lines, "\n")
 }
 
