@@ -9,7 +9,7 @@ keeps its logs, and brings everything back after a reboot.
   <img alt="procly monit: live process table, CPU and memory sparklines, and streaming logs" src="docs/monit-dark.png">
 </picture>
 
-> Status: early MVP. The CLI, daemon and terminal dashboard work; the web panel and multi-server support are next.
+> Status: early MVP. The CLI, daemon, terminal dashboard and web panel work; multi-server support is next.
 
 ## Install
 
@@ -54,6 +54,7 @@ procly ls
 | `procly describe <name>` | Everything about one process |
 | `procly logs [name]` | Print recent lines and follow |
 | `procly monit` | Live dashboard: processes, CPU/memory graphs, logs |
+| `procly web` | Web panel for the same, in the browser |
 | `procly save` / `procly resurrect` | Remember the process list / bring it back |
 | `procly startup` | Start on boot (systemd on Linux, launchd on macOS) |
 | `procly kill` | Stop all processes and the daemon |
@@ -78,6 +79,41 @@ sparklines and the selected process's logs streaming underneath.
 
 Colors follow your terminal theme. If it guesses light/dark wrong, set
 `PROCLY_THEME=light` or `PROCLY_THEME=dark`.
+
+## Web panel
+
+```sh
+procly web                  # http://127.0.0.1:4747
+procly web --port 8080
+procly web --addr 0.0.0.0:4747
+procly web --reset-password
+```
+
+The first start prints a random password once; only a bcrypt hash is stored
+(`~/.procly/web.json`). The panel shows every process with live CPU and memory,
+streams logs, and can restart, stop, start and delete. Keys: `j`/`k` to move,
+`r` restart, `s` stop/start, `/` filter.
+
+It listens on localhost by default. To reach it from your laptop, either tunnel:
+
+```sh
+ssh -L 4747:localhost:4747 you@your-server
+```
+
+or put it behind HTTPS with a reverse proxy, for example Caddy:
+
+```
+panel.example.com {
+    reverse_proxy 127.0.0.1:4747
+}
+```
+
+To keep the panel running, start it once by hand to note the password, stop it, then let procly run it:
+`procly start "procly web" --name panel`.
+
+Security: sessions are HttpOnly, SameSite=Strict cookies; every write needs an
+`X-Procly` header (CSRF); five wrong passwords lock an IP out for ten minutes;
+environment variable values never leave the server, only their names.
 
 ## Config file
 
@@ -130,7 +166,7 @@ State lives in `~/.procly` (override with `PROCLY_HOME`):
 
 - [x] Daemon, auto-restart with backoff, logs, CPU/memory, config file, save/resurrect, boot startup
 - [x] Interactive terminal UI (`procly monit`)
-- [ ] Web panel, embedded in the binary
+- [x] Web panel, embedded in the binary
 - [ ] Connect several servers to one panel
 - [ ] Log rotation, health checks, alerts, deploy from git
 

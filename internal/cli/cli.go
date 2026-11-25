@@ -21,6 +21,7 @@ import (
 	"github.com/itsahmadnyc/procly/internal/proc"
 	"github.com/itsahmadnyc/procly/internal/tui"
 	"github.com/itsahmadnyc/procly/internal/version"
+	"github.com/itsahmadnyc/procly/internal/web"
 )
 
 const usage = `procly %s, a process manager for your servers
@@ -37,6 +38,7 @@ Processes
   describe <name|id>            Details for one process            alias: show
   logs [name|id]                Print and follow logs
   monit                         Live dashboard in the terminal     alias: dash
+  web                           Web panel (--addr, --port, --reset-password)
 
 State
   save                          Remember the current process list
@@ -85,6 +87,8 @@ func Run(argv []string) int {
 		err = cmdLogs(rest)
 	case "monit", "dash", "top":
 		err = cmdMonit()
+	case "web", "panel":
+		err = cmdWeb(rest)
 	case "save":
 		err = cmdSave()
 	case "resurrect":
@@ -503,6 +507,34 @@ func cmdMonit() error {
 		return errors.New("daemon is not running, start a process first: procly start app.js")
 	}
 	return tui.Run(c)
+}
+
+func cmdWeb(argv []string) error {
+	a, err := parse(argv, flagSet{
+		valued: set("addr", "port"),
+		bools:  set("reset-password"),
+	})
+	if err != nil {
+		return err
+	}
+	addr := web.DefaultAddr
+	if v := a.get("addr"); v != "" {
+		addr = v
+	}
+	if v := a.get("port"); v != "" {
+		if a.get("addr") != "" {
+			return errors.New("use either --addr or --port, not both")
+		}
+		if n, err := strconv.Atoi(v); err != nil || n < 1 || n > 65535 {
+			return errors.New("--port must be between 1 and 65535")
+		}
+		addr = "127.0.0.1:" + v
+	}
+	// The panel is useful only with a daemon behind it, so make sure one runs.
+	if _, err := ensureDaemon(); err != nil {
+		return err
+	}
+	return web.Run(web.Options{Addr: addr, ResetPassword: a.bools["reset-password"], Out: os.Stdout})
 }
 
 func cmdDaemon(argv []string) error {
