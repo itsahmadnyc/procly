@@ -3,27 +3,37 @@ package remote
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"crypto/subtle"
-	"crypto/tls"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
+	"syscall"
 	"time"
 
 	"github.com/itsahmadnyc/procly/internal/logtail"
+	"github.com/itsahmadnyc/procly/internal/paths"
 	"github.com/itsahmadnyc/procly/internal/proc"
 	"github.com/itsahmadnyc/procly/internal/sse"
+	"github.com/itsahmadnyc/procly/internal/tlsid"
 )
+
+// ErrHubDown means a tunnel server was asked for but `procly hub` isn't running here.
+var ErrHubDown = errors.New("procly hub is not running on this machine, start it with 'procly hub'")
+
+func isDialError(err error) bool {
+	var op *net.OpError
+	return errors.As(err, &op) && op.Op == "dial" &&
+		(errors.Is(err, syscall.ENOENT) || errors.Is(err, syscall.ECONNREFUSED))
+}
 
 // Client talks to one agent. It trusts exactly one certificate, the one
 // whose fingerprint was given to `procly server add`.
 type Client struct {
 	s      Server
+	base   string
 	api    *http.Client // short requests
 	stream *http.Client // log streams, no overall timeout
 }
@@ -34,29 +44,33 @@ type Ping struct {
 	Daemon  bool   `json:"daemon"`
 }
 
-var ErrFingerprint = errors.New("certificate fingerprint does not match; the agent was reinstalled or someone is in the middle")
+var ErrFingerprint = tlsid.ErrMismatch
 
 func NewClient(s Server) *Client {
-	want, _ := normalizeFingerprint(s.Fingerprint)
-	tlsConf := &tls.Config{
-		MinVersion: tls.VersionTLS13,
-		// Normal CA checks are replaced by pinning the agent's own certificate.
-		InsecureSkipVerify: true, //nolint:gosec
-		VerifyConnection: func(cs tls.ConnectionState) error {
-			if len(cs.PeerCertificates) == 0 {
-				return ErrFingerprint
-			}
-			sum := sha256.Sum256(cs.PeerCertificates[0].Raw)
-			got := "sha256:" + hex.EncodeToString(sum[:])
-			if subtle.ConstantTimeCompare([]byte(got), []byte(want)) != 1 {
-				return ErrFingerprint
-			}
-			return nil
-		},
+	if s.Mode == ModeTunnel {
+		return newTunnelClient(s)
 	}
-	tr := &http.Transport{TLSClientConfig: tlsConf, ForceAttemptHTTP2: true, IdleConnTimeout: 90 * time.Second}
+	tr := &http.Transport{TLSClientConfig: tlsid.Pinned(s.Fingerprint), ForceAttemptHTTP2: true, IdleConnTimeout: 90 * time.Second}
 	return &Client{
 		s:      s,
+		base:   s.URL,
+		api:    &http.Client{Transport: tr, Timeout: 90 * time.Second},
+		stream: &http.Client{Transport: tr},
+	}
+}
+
+// newTunnelClient reaches an agent that dialed in to `procly hub`, through
+// the hub's local socket. The hub already authenticated that agent.
+func newTunnelClient(s Server) *Client {
+	tr := &http.Transport{
+		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			var d net.Dialer
+			return d.DialContext(ctx, "unix", paths.HubSocket())
+		},
+	}
+	return &Client{
+		s:      s,
+		base:   "http://hub/servers/" + url.PathEscape(s.Name),
 		api:    &http.Client{Transport: tr, Timeout: 90 * time.Second},
 		stream: &http.Client{Transport: tr},
 	}
@@ -65,13 +79,18 @@ func NewClient(s Server) *Client {
 func (c *Client) Name() string { return c.s.Name }
 
 func (c *Client) do(ctx context.Context, hc *http.Client, method, path string, out any) (*http.Response, error) {
-	req, err := http.NewRequestWithContext(ctx, method, c.s.URL+path, bytes.NewReader(nil))
+	req, err := http.NewRequestWithContext(ctx, method, c.base+path, bytes.NewReader(nil))
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+c.s.Token)
+	if c.s.Mode != ModeTunnel {
+		req.Header.Set("Authorization", "Bearer "+c.s.Token)
+	}
 	resp, err := hc.Do(req)
 	if err != nil {
+		if c.s.Mode == ModeTunnel && isDialError(err) {
+			return nil, ErrHubDown
+		}
 		var uerr *url.Error
 		if errors.As(err, &uerr) && errors.Is(uerr.Err, ErrFingerprint) {
 			return nil, ErrFingerprint

@@ -111,7 +111,14 @@ func printBanner(w io.Writer, addr string, id *identity) {
 	fmt.Fprintf(w, "  Allow port %s only from your panel server in the firewall.\n\n", port)
 }
 
-func (a *agent) routes() http.Handler {
+// routes is the API for hubs that dial this agent: the shared handlers
+// behind a bearer-token check.
+func (a *agent) routes() http.Handler { return a.authenticate(a.handlers()) }
+
+// handlers is the agent API without authentication. Tunnel connections use
+// it directly, because the hub checked this agent's token at connect time
+// and only the hub can send requests down that connection.
+func (a *agent) handlers() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/ping", func(w http.ResponseWriter, r *http.Request) {
 		resp := map[string]any{"version": version.Version, "host": a.host, "daemon": false}
@@ -150,7 +157,7 @@ func (a *agent) routes() http.Handler {
 		}
 		logtail.Stream(r.Context(), info.OutLog, info.ErrLog, 300, send)
 	})
-	return a.authenticate(mux)
+	return mux
 }
 
 // authenticate checks the bearer token against the stored hash in constant time.

@@ -41,10 +41,16 @@ Processes
   web                           Web panel (--addr, --port, --reset-password)
 
 Servers
-  agent                         Let a procly hub manage this server (--port, --reset-token)
-  server add <name> <url> ...   Connect another server's agent to this one
+  agent                         Let a hub reach this server (--port, --reset-token)
+  server add <name> <url> ...   Connect a reachable server's agent to this one
   server ls                     Connected servers and their status
   server rm <name>              Disconnect a server
+
+Servers behind NAT (they dial in)
+  hub                           Accept agents that connect in (--port, default 4749)
+  server invite <name>          Make a join command for a server (--hub-address)
+  agent join <hub:4749> ...     Save the hub and token on that server
+  agent connect                 Stay connected to the hub, reconnecting as needed
 
 State
   save                          Remember the current process list
@@ -102,6 +108,8 @@ func Run(argv []string) int {
 		err = cmdWeb(rest)
 	case "agent":
 		err = cmdAgent(rest)
+	case "hub":
+		err = cmdHub(rest)
 	case "server", "servers":
 		err = cmdServer(rest)
 	case "save":

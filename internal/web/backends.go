@@ -98,7 +98,11 @@ func (r *registry) all() ([]serverEntry, error) {
 			c = cached{srv: s, client: remote.NewClient(s)}
 			r.cache[s.Name] = c
 		}
-		entries = append(entries, serverEntry{name: s.Name, backend: c.client, url: s.URL})
+		where := s.URL
+		if s.Mode == remote.ModeTunnel {
+			where = "tunnel"
+		}
+		entries = append(entries, serverEntry{name: s.Name, backend: c.client, url: where})
 	}
 	for name := range r.cache {
 		if !seen[name] {

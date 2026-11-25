@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/itsahmadnyc/procly/internal/paths"
+	"github.com/itsahmadnyc/procly/internal/tlsid"
 )
 
 // LocalName is reserved for the machine the hub itself runs on.
@@ -21,18 +22,41 @@ const LocalName = "local"
 
 var nameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,39}$`)
 
-// Server is one connected agent. The token is stored in plain text because
-// the hub has to send it; servers.json is owner-only (0600).
+// Server modes: the hub dials a "direct" agent; a "tunnel" agent dials the
+// hub (for servers behind NAT or without an open port).
+const (
+	ModeDirect = "direct"
+	ModeTunnel = "tunnel"
+)
+
+// Server is one connected agent. For direct agents the token is stored in
+// plain text because the hub has to send it; tunnel agents send theirs, so
+// only its hash is kept. servers.json is owner-only (0600).
 type Server struct {
 	Name        string `json:"name"`
-	URL         string `json:"url"`
-	Token       string `json:"token"`
-	Fingerprint string `json:"fingerprint"`
+	Mode        string `json:"mode,omitempty"` // "" means direct
+	URL         string `json:"url,omitempty"`
+	Token       string `json:"token,omitempty"`
+	Fingerprint string `json:"fingerprint,omitempty"`
+	TokenHash   string `json:"token_hash,omitempty"`
+}
+
+func ValidName(name string) error {
+	if !nameRe.MatchString(name) || name == LocalName {
+		return fmt.Errorf("invalid server name %q: lowercase letters, digits, '.', '_', '-' (and not %q)", name, LocalName)
+	}
+	return nil
 }
 
 func (s Server) Validate() error {
-	if !nameRe.MatchString(s.Name) || s.Name == LocalName {
-		return fmt.Errorf("invalid server name %q: lowercase letters, digits, '.', '_', '-' (and not %q)", s.Name, LocalName)
+	if err := ValidName(s.Name); err != nil {
+		return err
+	}
+	if s.Mode == ModeTunnel {
+		if len(s.TokenHash) != 64 {
+			return errors.New("tunnel server needs a token hash")
+		}
+		return nil
 	}
 	u, err := url.Parse(s.URL)
 	if err != nil || u.Scheme != "https" || u.Host == "" || (u.Path != "" && u.Path != "/") {
@@ -80,12 +104,14 @@ func save(list []Server) error {
 
 // Add saves s, replacing a server with the same name.
 func Add(s Server) error {
-	s.URL = strings.TrimRight(s.URL, "/")
-	fp, err := normalizeFingerprint(s.Fingerprint)
-	if err != nil {
-		return err
+	if s.Mode != ModeTunnel {
+		s.URL = strings.TrimRight(s.URL, "/")
+		fp, err := normalizeFingerprint(s.Fingerprint)
+		if err != nil {
+			return err
+		}
+		s.Fingerprint = fp
 	}
-	s.Fingerprint = fp
 	if err := s.Validate(); err != nil {
 		return err
 	}
@@ -123,13 +149,18 @@ func Remove(name string) error {
 	return save(out)
 }
 
-// normalizeFingerprint accepts "sha256:ab12...", "AB:12:...", or plain hex.
-func normalizeFingerprint(fp string) (string, error) {
-	h := strings.ToLower(strings.TrimSpace(fp))
-	h = strings.TrimPrefix(h, "sha256:")
-	h = strings.ReplaceAll(h, ":", "")
-	if len(h) != 64 || strings.Trim(h, "0123456789abcdef") != "" {
-		return "", fmt.Errorf("fingerprint must be the sha256 shown by 'procly agent', got %q", fp)
+func normalizeFingerprint(fp string) (string, error) { return tlsid.Normalize(fp) }
+
+// Get returns one saved server by name.
+func Get(name string) (Server, bool, error) {
+	list, err := Load()
+	if err != nil {
+		return Server{}, false, err
 	}
-	return "sha256:" + h, nil
+	for _, s := range list {
+		if s.Name == name {
+			return s, true, nil
+		}
+	}
+	return Server{}, false, nil
 }

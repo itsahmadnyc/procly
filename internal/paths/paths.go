@@ -22,13 +22,18 @@ func Home() string {
 
 // Socket is the unix socket the daemon listens on. Unix socket paths are
 // limited to ~104 bytes, so a long home falls back to a hashed temp path.
-func Socket() string {
-	p := filepath.Join(Home(), "procly.sock")
+func Socket() string { return socketPath("procly") }
+
+// HubSocket is where `procly hub` serves connected agents to local clients.
+func HubSocket() string { return socketPath("hub") }
+
+func socketPath(name string) string {
+	p := filepath.Join(Home(), name+".sock")
 	if len(p) <= 100 {
 		return p
 	}
 	sum := sha1.Sum([]byte(Home()))
-	return filepath.Join(os.TempDir(), "procly-"+hex.EncodeToString(sum[:4])+".sock")
+	return filepath.Join(os.TempDir(), name+"-"+hex.EncodeToString(sum[:4])+".sock")
 }
 
 func LogDir() string    { return filepath.Join(Home(), "logs") }

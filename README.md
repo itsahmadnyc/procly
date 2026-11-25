@@ -57,6 +57,7 @@ procly ls
 | `procly web` | Web panel for the same, in the browser |
 | `procly agent` | Let another server's panel manage this one |
 | `procly server add/ls/rm` | Connect, list and remove other servers |
+| `procly hub` / `server invite` | Manage servers behind NAT that dial in |
 | `procly save` / `procly resurrect` | Remember the process list / bring it back |
 | `procly startup` | Start on boot (systemd on Linux, launchd on macOS) |
 | `procly kill` | Stop all processes and the daemon |
@@ -167,6 +168,39 @@ How it stays safe:
   start new commands.
 - Open the agent port only to your panel server in the firewall, for example
   `ufw allow from <panel-ip> to any port 4748`.
+
+### Servers behind NAT
+
+When a server can't accept incoming connections (home lab, office network, no
+open ports), let it dial out to the hub instead.
+
+On the hub (the server that runs `procly web`):
+
+```sh
+procly start "procly hub" --name procly-hub    # listens on :4749 for agents
+procly server invite office-1 --hub-address hub.example.com:4749
+```
+
+`invite` prints two commands to run on the other server:
+
+```sh
+procly agent join hub.example.com:4749 --name office-1 \
+  --fingerprint sha256:<hub fingerprint> --token <token>
+procly start "procly agent connect" --name procly-agent
+```
+
+The agent keeps one TLS connection open to the hub and reconnects on its own.
+Requests and live logs run as HTTP/2 streams over that connection, so
+`procly web`, `procly ls -S office-1` and everything else work the same as for
+directly reachable servers.
+
+- The agent pins the hub's certificate by fingerprint; the hub checks the
+  agent's token against the hash it stored at `invite`. Neither side trusts a CA.
+- `join` saves its settings to `~/.procly/agent-connect.json` (mode 600), so
+  the token never appears on a command line or in `procly ls`.
+- `procly server invite <name>` again issues a new token and drops the old
+  connection; `procly server rm <name>` cuts it off within ten seconds.
+- Only the hub's port 4749 needs to be reachable; the agent opens nothing.
 
 ## Config file
 

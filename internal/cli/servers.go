@@ -2,18 +2,37 @@ package cli
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"strconv"
 	"sync"
 	"time"
 
 	"github.com/itsahmadnyc/procly/internal/agent"
+	"github.com/itsahmadnyc/procly/internal/hub"
 	"github.com/itsahmadnyc/procly/internal/remote"
+	"github.com/itsahmadnyc/procly/internal/tlsid"
 )
 
 func cmdAgent(argv []string) error {
+	if len(argv) > 0 {
+		switch argv[0] {
+		case "join":
+			return cmdAgentJoin(argv[1:])
+		case "connect":
+			if len(argv) > 1 {
+				return errors.New("usage: procly agent connect (settings come from 'procly agent join')")
+			}
+			if _, err := ensureDaemon(); err != nil {
+				return err
+			}
+			return agent.Connect(os.Stdout)
+		}
+	}
 	a, err := parse(argv, flagSet{
 		valued: set("addr", "port"),
 		bools:  set("reset-token"),
@@ -42,8 +61,112 @@ func cmdAgent(argv []string) error {
 
 const serverUsage = `usage:
   procly server add <name> <https://host:4748> --token <token> --fingerprint <sha256:...>
+  procly server invite <name> [--hub-address <host:4749>]
   procly server ls
   procly server rm <name>`
+
+func cmdAgentJoin(argv []string) error {
+	a, err := parse(argv, flagSet{valued: set("name", "fingerprint", "token")})
+	if err != nil {
+		return err
+	}
+	if len(a.pos) != 1 || a.get("name") == "" || a.get("fingerprint") == "" || a.get("token") == "" {
+		return errors.New("usage: procly agent join <hub-host:4749> --name <name> --fingerprint <sha256:...> --token <token>\n  Copy it from 'procly server invite' on the hub.")
+	}
+	cfg := agent.JoinConfig{Hub: a.pos[0], Name: a.get("name"), Fingerprint: a.get("fingerprint"), Token: a.get("token")}
+	if err := agent.Join(cfg); err != nil {
+		var rej *agent.ErrRejected
+		switch {
+		case errors.Is(err, remote.ErrFingerprint):
+			return errors.New("the hub's certificate fingerprint doesn't match; copy the command again from 'procly server invite'")
+		case errors.As(err, &rej):
+			return err
+		}
+		return fmt.Errorf("%v\n  Is 'procly hub' running there, and is port %s reachable from this server?", err, portFrom(cfg.Hub))
+	}
+	fmt.Printf("  %s %s as %s\n", green("joined"), bold(cfg.Hub), bold(cfg.Name))
+	fmt.Println(dim("  Settings saved to ~/.procly/agent-connect.json. Keep the agent connected with:"))
+	fmt.Print("\n  procly start \"procly agent connect\" --name procly-agent\n\n")
+	return nil
+}
+
+func portFrom(addr string) string {
+	if _, p, err := net.SplitHostPort(addr); err == nil {
+		return p
+	}
+	return hub.DefaultPort
+}
+
+func cmdHub(argv []string) error {
+	a, err := parse(argv, flagSet{valued: set("addr", "port")})
+	if err != nil {
+		return err
+	}
+	addr := hub.DefaultAddr
+	if v := a.get("addr"); v != "" {
+		addr = v
+	}
+	if v := a.get("port"); v != "" {
+		if a.get("addr") != "" {
+			return errors.New("use either --addr or --port, not both")
+		}
+		if n, err := strconv.Atoi(v); err != nil || n < 1 || n > 65535 {
+			return errors.New("--port must be between 1 and 65535")
+		}
+		addr = "0.0.0.0:" + v
+	}
+	return hub.Run(hub.Options{Addr: addr, Out: os.Stdout})
+}
+
+// cmdServerInvite registers a tunnel server and prints what to run on it.
+func cmdServerInvite(argv []string) error {
+	a, err := parse(argv, flagSet{valued: set("hub-address")})
+	if err != nil {
+		return err
+	}
+	if len(a.pos) != 1 {
+		return errors.New("usage: procly server invite <name> [--hub-address <host:4749>]")
+	}
+	name := a.pos[0]
+	if err := remote.ValidName(name); err != nil {
+		return err
+	}
+	existing, ok, err := remote.Get(name)
+	if err != nil {
+		return err
+	}
+	if ok && existing.Mode != remote.ModeTunnel {
+		return fmt.Errorf("%s is already added as a direct server; remove it first with 'procly server rm %s'", name, name)
+	}
+	_, fp, err := hub.Identity()
+	if err != nil {
+		return err
+	}
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return err
+	}
+	token := base64.RawURLEncoding.EncodeToString(raw)
+	if err := remote.Add(remote.Server{Name: name, Mode: remote.ModeTunnel, TokenHash: tlsid.TokenHash(token)}); err != nil {
+		return err
+	}
+	addr := a.get("hub-address")
+	if addr == "" {
+		addr = "<this-server-address>:" + hub.DefaultPort
+	}
+	if ok {
+		fmt.Printf("  %s %s with a new token; its old connection will be dropped.\n", yellow("re-invited"), bold(name))
+	} else {
+		fmt.Printf("  %s %s\n", green("invited"), bold(name))
+	}
+	fmt.Printf("\n  On %s run:\n\n", name)
+	fmt.Printf("  procly agent join %s --name %s \\\n    --fingerprint %s \\\n    --token %s\n", addr, name, fp, token)
+	fmt.Println("  procly start \"procly agent connect\" --name procly-agent")
+	fmt.Println(dim("\n  The token is shown once; only its hash is kept here."))
+	fmt.Println(dim("  This server must run the hub and accept port " + portFrom(addr) + ": procly start \"procly hub\" --name procly-hub"))
+	fmt.Println()
+	return nil
+}
 
 func cmdServer(argv []string) error {
 	if len(argv) == 0 {
@@ -52,6 +175,8 @@ func cmdServer(argv []string) error {
 	switch argv[0] {
 	case "add":
 		return cmdServerAdd(argv[1:])
+	case "invite":
+		return cmdServerInvite(argv[1:])
 	case "ls", "list":
 		return cmdServerList()
 	case "rm", "remove", "delete":
@@ -112,7 +237,8 @@ func cmdServerList() error {
 		return err
 	}
 	if len(list) == 0 {
-		fmt.Println(dim("\n  No servers added. On another server run 'procly agent', then 'procly server add' here.\n"))
+		fmt.Println(dim("\n  No servers yet. Reachable server: run 'procly agent' there, then 'procly server add' here."))
+		fmt.Println(dim("  Behind NAT: run 'procly hub' here, then 'procly server invite <name>'.\n"))
 		return nil
 	}
 	type row struct {
@@ -131,8 +257,14 @@ func cmdServerList() error {
 			ping, err := c.Ping(ctx)
 			if err != nil {
 				rows[i] = row{status: "● unreachable", procs: "-", host: "-", version: "-"}
-				if errors.Is(err, remote.ErrFingerprint) {
+				var se *remote.StatusError
+				switch {
+				case errors.Is(err, remote.ErrFingerprint):
 					rows[i].status = "● bad fingerprint"
+				case errors.Is(err, remote.ErrHubDown):
+					rows[i].status = "● hub not running"
+				case errors.As(err, &se) && se.Code == 502 && s.Mode == remote.ModeTunnel:
+					rows[i].status = "● not connected"
 				}
 				return
 			}
@@ -152,10 +284,14 @@ func cmdServerList() error {
 
 	cells := make([][]string, len(list))
 	for i, s := range list {
-		cells[i] = []string{s.Name, rows[i].status, rows[i].procs, rows[i].host, s.URL, rows[i].version}
+		where := s.URL
+		if s.Mode == remote.ModeTunnel {
+			where = "tunnel (dials in)"
+		}
+		cells[i] = []string{s.Name, rows[i].status, rows[i].procs, rows[i].host, where, rows[i].version}
 	}
 	fmt.Println()
-	renderTable(os.Stdout, []string{"name", "status", "online", "host", "url", "version"}, cells, map[int]bool{2: true},
+	renderTable(os.Stdout, []string{"name", "status", "online", "host", "address", "version"}, cells, map[int]bool{2: true},
 		func(r, c int, s string) string {
 			switch c {
 			case 0:

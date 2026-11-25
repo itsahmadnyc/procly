@@ -1,21 +1,16 @@
 package agent
 
 import (
-	"crypto/ecdsa"
-	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/tls"
-	"crypto/x509"
-	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"encoding/pem"
 	"errors"
-	"math/big"
 	"os"
-	"time"
+
+	"github.com/itsahmadnyc/procly/internal/tlsid"
 )
 
 // creds is what the agent keeps on disk (agent.json, mode 0600). The token
@@ -31,12 +26,6 @@ type identity struct {
 	tokenHash   []byte
 	fingerprint string
 	newToken    string // set only when a token was just created
-}
-
-// Fingerprint is how hubs pin an agent's certificate: sha256 of the DER bytes.
-func Fingerprint(der []byte) string {
-	sum := sha256.Sum256(der)
-	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
 func loadIdentity(path string, resetToken bool) (*identity, error) {
@@ -55,7 +44,8 @@ func loadIdentity(path string, resetToken bool) (*identity, error) {
 	id := &identity{}
 	changed := false
 	if c.CertPEM == "" || c.KeyPEM == "" {
-		if c.CertPEM, c.KeyPEM, err = newCert(); err != nil {
+		host, _ := os.Hostname()
+		if c.CertPEM, c.KeyPEM, err = tlsid.NewCert("procly agent " + host); err != nil {
 			return nil, err
 		}
 		changed = true
@@ -87,39 +77,6 @@ func loadIdentity(path string, resetToken bool) (*identity, error) {
 	if id.tokenHash, err = hex.DecodeString(c.TokenHash); err != nil {
 		return nil, errors.New(path + " has a bad token hash; run with --reset-token")
 	}
-	id.fingerprint = Fingerprint(id.cert.Certificate[0])
+	id.fingerprint = tlsid.Fingerprint(id.cert.Certificate[0])
 	return id, nil
-}
-
-// newCert makes a self-signed ECDSA P-256 certificate. Hubs trust it by
-// fingerprint, so names and CAs don't matter.
-func newCert() (certPEM, keyPEM string, err error) {
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		return "", "", err
-	}
-	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
-	if err != nil {
-		return "", "", err
-	}
-	host, _ := os.Hostname()
-	tmpl := &x509.Certificate{
-		SerialNumber: serial,
-		Subject:      pkix.Name{CommonName: "procly agent " + host},
-		NotBefore:    time.Now().Add(-time.Hour),
-		NotAfter:     time.Now().AddDate(10, 0, 0),
-		KeyUsage:     x509.KeyUsageDigitalSignature,
-		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-	}
-	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
-	if err != nil {
-		return "", "", err
-	}
-	keyDER, err := x509.MarshalECPrivateKey(key)
-	if err != nil {
-		return "", "", err
-	}
-	certPEM = string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))
-	keyPEM = string(pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}))
-	return certPEM, keyPEM, nil
 }

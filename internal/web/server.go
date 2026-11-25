@@ -374,6 +374,8 @@ func friendly(err error) string {
 	switch {
 	case errors.Is(err, remote.ErrFingerprint):
 		return "certificate fingerprint does not match the one saved with 'procly server add'"
+	case errors.Is(err, remote.ErrHubDown):
+		return err.Error()
 	case errors.As(err, &remoteErr) && remoteErr.Code == http.StatusUnauthorized:
 		return "the agent rejected the token"
 	case errors.Is(err, context.DeadlineExceeded):
