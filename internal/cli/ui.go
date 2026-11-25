@@ -8,7 +8,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"procly/internal/proc"
+	"github.com/itsahmadnyc/procly/internal/proc"
 )
 
 var colorOn = func() bool {

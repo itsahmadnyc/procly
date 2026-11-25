@@ -14,12 +14,12 @@ import (
 	"syscall"
 	"time"
 
-	"procly/internal/client"
-	"procly/internal/config"
-	"procly/internal/daemon"
-	"procly/internal/paths"
-	"procly/internal/proc"
-	"procly/internal/version"
+	"github.com/itsahmadnyc/procly/internal/client"
+	"github.com/itsahmadnyc/procly/internal/config"
+	"github.com/itsahmadnyc/procly/internal/daemon"
+	"github.com/itsahmadnyc/procly/internal/paths"
+	"github.com/itsahmadnyc/procly/internal/proc"
+	"github.com/itsahmadnyc/procly/internal/version"
 )
 
 const usage = `procly %s, a process manager for your servers

@@ -1,4 +1,4 @@
-module procly
+module github.com/itsahmadnyc/procly
 
 go 1.27.4
 

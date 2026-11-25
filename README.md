@@ -8,7 +8,16 @@ keeps its logs, and brings everything back after a reboot.
 
 ## Install
 
+With Go 1.22 or newer:
+
 ```sh
+go install github.com/itsahmadnyc/procly/cmd/procly@latest
+```
+
+Or from source:
+
+```sh
+git clone https://github.com/itsahmadnyc/procly && cd procly
 go build -o /usr/local/bin/procly ./cmd/procly
 ```
 

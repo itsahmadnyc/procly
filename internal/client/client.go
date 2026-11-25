@@ -11,8 +11,8 @@ import (
 	"net/url"
 	"time"
 
-	"procly/internal/paths"
-	"procly/internal/proc"
+	"github.com/itsahmadnyc/procly/internal/paths"
+	"github.com/itsahmadnyc/procly/internal/proc"
 )
 
 type Client struct{ hc *http.Client }

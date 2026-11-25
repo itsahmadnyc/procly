@@ -16,9 +16,9 @@ import (
 	"syscall"
 	"time"
 
-	"procly/internal/paths"
-	"procly/internal/proc"
-	"procly/internal/version"
+	"github.com/itsahmadnyc/procly/internal/paths"
+	"github.com/itsahmadnyc/procly/internal/proc"
+	"github.com/itsahmadnyc/procly/internal/version"
 )
 
 // Run starts the daemon in the foreground and blocks until it is told to stop.

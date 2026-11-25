@@ -9,7 +9,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"procly/internal/proc"
+	"github.com/itsahmadnyc/procly/internal/proc"
 )
 
 type File struct {

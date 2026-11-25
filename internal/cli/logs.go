@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"procly/internal/paths"
+	"github.com/itsahmadnyc/procly/internal/paths"
 )
 
 type logFile struct {

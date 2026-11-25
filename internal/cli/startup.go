@@ -9,7 +9,7 @@ import (
 	"runtime"
 	"strings"
 
-	"procly/internal/paths"
+	"github.com/itsahmadnyc/procly/internal/paths"
 )
 
 func cmdStartup() error {

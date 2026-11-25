@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"procly/internal/cli"
+	"github.com/itsahmadnyc/procly/internal/cli"
 )
 
 func main() {
