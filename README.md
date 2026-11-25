@@ -4,6 +4,11 @@ A process manager for your servers. One small binary, no runtime needed.
 Runs Node, Python, Go, or any other command, restarts it when it crashes,
 keeps its logs, and brings everything back after a reboot.
 
+<picture>
+  <source media="(prefers-color-scheme: light)" srcset="docs/monit-light.png">
+  <img alt="procly monit: live process table, CPU and memory sparklines, and streaming logs" src="docs/monit-dark.png">
+</picture>
+
 > Status: early MVP. The CLI, daemon and terminal dashboard work; the web panel and multi-server support are next.
 
 ## Install
