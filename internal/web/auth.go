@@ -17,10 +17,12 @@ const (
 	sessionTTL   = 7 * 24 * time.Hour
 	failWindow   = 10 * time.Minute
 	maxFailures  = 5
-	bcryptCost   = 12
 	cookieName   = "procly_session"
 	passwordSize = 15 // bytes of randomness, 20 characters encoded
 )
+
+// bcryptCost is a var only so tests can lower it; production uses 12.
+var bcryptCost = 12
 
 type webConfig struct {
 	PasswordHash string `json:"password_hash"`

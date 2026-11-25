@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -241,13 +242,49 @@ func openLog(path string) (*os.File, error) {
 	return os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 }
 
-// shellCommand prefixes simple commands with exec so the shell is replaced
-// and the PID we track is the real program. Compound commands keep the shell.
+var assignmentRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
+
+// Words that must run inside the shell: `exec exit 1` or `exec cd x` would
+// look for a program with that name.
+var shellBuiltins = map[string]bool{
+	"exit": true, "cd": true, "export": true, "source": true, ".": true, "set": true,
+	"unset": true, "eval": true, "exec": true, "trap": true, "ulimit": true, "umask": true,
+	"wait": true, "shift": true, "read": true, "alias": true, "readonly": true, "local": true,
+	"return": true, "break": true, "continue": true, "type": true, "command": true,
+	"true": true, "false": true, ":": true, "if": true, "for": true, "while": true,
+	"until": true, "case": true, "{": true, "!": true, "function": true, "[": true, "test": true,
+}
+
+// shellCommand puts exec in front of the program of a simple command, so the
+// shell is replaced and the PID we track is the real program. Leading
+// VAR=value words stay in front ("PORT=3000 exec node app.js"). Anything
+// compound, quoted or built in keeps the shell; stop still reaches the
+// program because it signals the whole process group.
 func shellCommand(c string) string {
 	if strings.ContainsAny(c, ";&|\n()`") {
 		return c
 	}
-	return "exec " + c
+	fields := strings.Fields(c)
+	i := 0
+	for i < len(fields) && assignmentRe.MatchString(fields[i]) {
+		if strings.ContainsAny(fields[i], "\"'$\\") {
+			return c // a quoted or expanded value may span words; leave it to sh
+		}
+		i++
+	}
+	if i == len(fields) || shellBuiltins[fields[i]] {
+		return c
+	}
+	pos := 0 // byte offset just past the assignments
+	for _, f := range fields[:i] {
+		pos += strings.Index(c[pos:], f) + len(f)
+	}
+	head := strings.TrimSpace(c[:pos])
+	rest := strings.TrimLeft(c[pos:], " \t")
+	if head == "" {
+		return "exec " + rest
+	}
+	return head + " exec " + rest
 }
 
 func buildEnv(extra map[string]string, id int, name string) []string {
