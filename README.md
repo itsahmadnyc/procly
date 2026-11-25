@@ -4,7 +4,7 @@ A process manager for your servers. One small binary, no runtime needed.
 Runs Node, Python, Go, or any other command, restarts it when it crashes,
 keeps its logs, and brings everything back after a reboot.
 
-> Status: early MVP. The CLI and daemon work; the web panel and multi-server support are next.
+> Status: early MVP. The CLI, daemon and terminal dashboard work; the web panel and multi-server support are next.
 
 ## Install
 
@@ -48,12 +48,31 @@ procly ls
 | `procly ls` | Table of processes with CPU and memory |
 | `procly describe <name>` | Everything about one process |
 | `procly logs [name]` | Print recent lines and follow |
+| `procly monit` | Live dashboard: processes, CPU/memory graphs, logs |
 | `procly save` / `procly resurrect` | Remember the process list / bring it back |
 | `procly startup` | Start on boot (systemd on Linux, launchd on macOS) |
 | `procly kill` | Stop all processes and the daemon |
 
 Files are run by extension (`.js` with node, `.py` with python3, `.sh` with bash, ...).
 Arguments for your script go after `--`: `procly start app.js -- --port 3000`.
+
+## Live dashboard
+
+`procly monit` opens a full-screen view of every process with CPU and memory
+sparklines and the selected process's logs streaming underneath.
+
+| Key | Action |
+|---|---|
+| `↑` `↓` / `k` `j` | Select a process |
+| `r` | Restart |
+| `s` | Stop, or start if stopped |
+| `d` | Delete (asks first) |
+| `enter` | Expand logs, `esc` to go back |
+| `?` | All keys |
+| `q` | Quit (processes keep running) |
+
+Colors follow your terminal theme. If it guesses light/dark wrong, set
+`PROCLY_THEME=light` or `PROCLY_THEME=dark`.
 
 ## Config file
 
@@ -105,7 +124,7 @@ State lives in `~/.procly` (override with `PROCLY_HOME`):
 ## Roadmap
 
 - [x] Daemon, auto-restart with backoff, logs, CPU/memory, config file, save/resurrect, boot startup
-- [ ] Interactive terminal UI (`procly monit`)
+- [x] Interactive terminal UI (`procly monit`)
 - [ ] Web panel, embedded in the binary
 - [ ] Connect several servers to one panel
 - [ ] Log rotation, health checks, alerts, deploy from git

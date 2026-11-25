@@ -19,6 +19,7 @@ import (
 	"github.com/itsahmadnyc/procly/internal/daemon"
 	"github.com/itsahmadnyc/procly/internal/paths"
 	"github.com/itsahmadnyc/procly/internal/proc"
+	"github.com/itsahmadnyc/procly/internal/tui"
 	"github.com/itsahmadnyc/procly/internal/version"
 )
 
@@ -35,6 +36,7 @@ Processes
   list                          Show all processes                 alias: ls
   describe <name|id>            Details for one process            alias: show
   logs [name|id]                Print and follow logs
+  monit                         Live dashboard in the terminal     alias: dash
 
 State
   save                          Remember the current process list
@@ -81,6 +83,8 @@ func Run(argv []string) int {
 		err = cmdDescribe(rest)
 	case "logs", "log":
 		err = cmdLogs(rest)
+	case "monit", "dash", "top":
+		err = cmdMonit()
 	case "save":
 		err = cmdSave()
 	case "resurrect":
@@ -487,6 +491,18 @@ func cmdKill() error {
 	}
 	fmt.Printf("  %s %d %s and the daemon\n", green("stopped"), len(infos), plural(len(infos), "process", "processes"))
 	return nil
+}
+
+func cmdMonit() error {
+	fi, err := os.Stdout.Stat()
+	if err != nil || fi.Mode()&os.ModeCharDevice == 0 {
+		return errors.New("monit needs an interactive terminal, use 'procly ls' in scripts")
+	}
+	c, ok := connect()
+	if !ok {
+		return errors.New("daemon is not running, start a process first: procly start app.js")
+	}
+	return tui.Run(c)
 }
 
 func cmdDaemon(argv []string) error {

@@ -1,10 +1,8 @@
 package cli
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -13,15 +11,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/itsahmadnyc/procly/internal/logtail"
 	"github.com/itsahmadnyc/procly/internal/paths"
 )
 
 type logFile struct {
-	path    string
-	name    string
-	stderr  bool
-	offset  int64
-	partial []byte
+	path   string
+	name   string
+	stderr bool
+	follow *logtail.Follower
 }
 
 func cmdLogs(argv []string) error {
@@ -63,8 +61,8 @@ func cmdLogs(argv []string) error {
 	}
 
 	for _, f := range files {
-		tail, size := tailLines(f.path, lines)
-		f.offset = size
+		tail, size := logtail.Tail(f.path, lines)
+		f.follow = logtail.NewFollower(f.path, size)
 		if lines == 0 {
 			continue
 		}
@@ -89,7 +87,9 @@ func cmdLogs(argv []string) error {
 			return nil
 		case <-tick.C:
 			for _, f := range files {
-				follow(f, labelWidth)
+				for _, l := range f.follow.Read() {
+					printLogLine(f, labelWidth, l)
+				}
 			}
 		}
 	}
@@ -144,67 +144,4 @@ func printLogLine(f *logFile, labelWidth int, line string) {
 		label = gray(label)
 	}
 	fmt.Printf("  %s %s\n", label, line)
-}
-
-// tailLines returns the last n lines of a file and its current size.
-func tailLines(path string, n int) ([]string, int64) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, 0
-	}
-	defer f.Close()
-	fi, err := f.Stat()
-	if err != nil {
-		return nil, 0
-	}
-	size := fi.Size()
-	const chunk = 256 << 10
-	start := max(size-chunk, 0)
-	buf := make([]byte, size-start)
-	if _, err := f.ReadAt(buf, start); err != nil && err != io.EOF {
-		return nil, size
-	}
-	text := strings.TrimRight(string(buf), "\n")
-	if text == "" {
-		return nil, size
-	}
-	all := strings.Split(text, "\n")
-	if start > 0 && len(all) > 1 {
-		all = all[1:] // first line is probably cut in half
-	}
-	if len(all) > n {
-		all = all[len(all)-n:]
-	}
-	return all, size
-}
-
-func follow(f *logFile, labelWidth int) {
-	fi, err := os.Stat(f.path)
-	if err != nil {
-		return
-	}
-	if fi.Size() < f.offset { // truncated or rotated
-		f.offset, f.partial = 0, nil
-	}
-	if fi.Size() == f.offset {
-		return
-	}
-	fh, err := os.Open(f.path)
-	if err != nil {
-		return
-	}
-	defer fh.Close()
-	buf := make([]byte, fi.Size()-f.offset)
-	n, _ := fh.ReadAt(buf, f.offset)
-	f.offset += int64(n)
-	data := append(f.partial, buf[:n]...)
-	idx := bytes.LastIndexByte(data, '\n')
-	if idx < 0 {
-		f.partial = data
-		return
-	}
-	f.partial = append([]byte(nil), data[idx+1:]...)
-	for _, l := range strings.Split(string(data[:idx]), "\n") {
-		printLogLine(f, labelWidth, l)
-	}
 }
