@@ -85,6 +85,15 @@ type hub struct {
 	h2      *http2.Transport
 }
 
+func newHub(logger *log.Logger) *hub {
+	return &hub{
+		tunnels: map[string]*tunnel{},
+		logger:  logger,
+		// Pings find agents that vanished without closing the connection.
+		h2: &http2.Transport{ReadIdleTimeout: 30 * time.Second, PingTimeout: 15 * time.Second},
+	}
+}
+
 type Options struct {
 	Addr string
 	Out  io.Writer
@@ -114,12 +123,7 @@ func Run(opts Options) error {
 		return err
 	}
 
-	h := &hub{
-		tunnels: map[string]*tunnel{},
-		logger:  log.New(os.Stderr, "", log.LstdFlags),
-		// Pings find agents that vanished without closing the connection.
-		h2: &http2.Transport{ReadIdleTimeout: 30 * time.Second, PingTimeout: 15 * time.Second},
-	}
+	h := newHub(log.New(os.Stderr, "", log.LstdFlags))
 	printBanner(opts.Out, opts.Addr, fp)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -285,24 +289,30 @@ func (h *hub) reconcileLoop(ctx context.Context) {
 			return
 		case <-tick.C:
 		}
-		list, err := remote.Load()
-		if err != nil {
-			continue
+		h.reconcile()
+	}
+}
+
+// reconcile closes every tunnel whose server is gone from servers.json or
+// has a different token hash than when it connected.
+func (h *hub) reconcile() {
+	list, err := remote.Load()
+	if err != nil {
+		return
+	}
+	valid := map[string]string{}
+	for _, s := range list {
+		if s.Mode == remote.ModeTunnel {
+			valid[s.Name] = s.TokenHash
 		}
-		valid := map[string]string{}
-		for _, s := range list {
-			if s.Mode == remote.ModeTunnel {
-				valid[s.Name] = s.TokenHash
-			}
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for name, t := range h.tunnels {
+		if hash, ok := valid[name]; !ok || hash != t.tokenHash {
+			h.logger.Printf("%s: removed or re-invited, closing its connection", name)
+			t.conn.Close()
 		}
-		h.mu.Lock()
-		for name, t := range h.tunnels {
-			if hash, ok := valid[name]; !ok || hash != t.tokenHash {
-				h.logger.Printf("%s: removed or re-invited, closing its connection", name)
-				t.conn.Close()
-			}
-		}
-		h.mu.Unlock()
 	}
 }
 
