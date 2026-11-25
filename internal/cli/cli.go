@@ -60,6 +60,11 @@ Start options
       --max-restarts <n>        Give up after n quick crashes (default 15)
   -- <args>                     Everything after -- goes to the script
 
+Other servers
+  -S, --server <name>           Run ls, describe, stop, restart, delete, logs
+                                or save on a server added with 'server add'.
+                                PROCLY_SERVER sets a default.
+
 Logs options
       --lines <n>               Lines of history to print (default 15)
       --out, --err              Only stdout or only stderr
@@ -86,7 +91,7 @@ func Run(argv []string) int {
 	case "stop", "restart", "delete", "rm", "del":
 		err = cmdAction(cmd, rest)
 	case "list", "ls", "l", "status":
-		err = cmdList()
+		err = cmdList(rest)
 	case "describe", "show", "info":
 		err = cmdDescribe(rest)
 	case "logs", "log":
@@ -100,7 +105,7 @@ func Run(argv []string) int {
 	case "server", "servers":
 		err = cmdServer(rest)
 	case "save":
-		err = cmdSave()
+		err = cmdSave(rest)
 	case "resurrect":
 		err = cmdResurrect()
 	case "startup":
@@ -169,13 +174,16 @@ func connect() (*client.Client, bool) {
 }
 
 func cmdStart(argv []string) error {
-	a, err := parse(argv, flagSet{
+	a, err := parse(argv, withServer(flagSet{
 		valued: set("name", "cwd", "env", "max-restarts"),
 		bools:  set("no-autorestart"),
 		alias:  map[string]string{"n": "name", "e": "env"},
-	})
+	}))
 	if err != nil {
 		return err
+	}
+	if server := pickServer(a); server != "" {
+		return fmt.Errorf("start runs on this machine only; agents don't start new commands. Run it on %s, then manage it from here", server)
 	}
 	if len(a.pos) == 0 {
 		return errors.New("usage: procly start <file|command|config> [options]")
@@ -350,12 +358,15 @@ func fileExists(p string) bool {
 }
 
 func cmdAction(action string, argv []string) error {
-	a, err := parse(argv, flagSet{})
+	a, err := parse(argv, withServer(flagSet{}))
 	if err != nil {
 		return err
 	}
 	if len(a.pos) == 0 {
-		return fmt.Errorf("usage: procly %s <name|id|all>", action)
+		return fmt.Errorf("usage: procly %s <name|id|all> [--server <name>]", action)
+	}
+	if server := pickServer(a); server != "" {
+		return remoteAction(server, action, a.pos)
 	}
 	c, ok := connect()
 	if !ok {
@@ -394,11 +405,27 @@ func showList(c *client.Client) error {
 	if err != nil {
 		return err
 	}
-	printList(os.Stdout, infos)
+	printList(os.Stdout, proc.NewViews(infos), "")
 	return nil
 }
 
-func cmdList() error {
+func cmdList(argv []string) error {
+	a, err := parse(argv, withServer(flagSet{}))
+	if err != nil {
+		return err
+	}
+	if server := pickServer(a); server != "" {
+		c, err := remoteServer(server)
+		if err != nil {
+			return err
+		}
+		views, err := remoteList(c, server)
+		if err != nil {
+			return err
+		}
+		printList(os.Stdout, views, server)
+		return nil
+	}
 	c, ok := connect()
 	if !ok {
 		fmt.Println(dim("\n  Daemon is not running. Start a process with: procly start app.js\n"))
@@ -408,14 +435,21 @@ func cmdList() error {
 }
 
 func cmdDescribe(argv []string) error {
-	if len(argv) != 1 {
-		return errors.New("usage: procly describe <name|id>")
+	a, err := parse(argv, withServer(flagSet{}))
+	if err != nil {
+		return err
+	}
+	if len(a.pos) != 1 {
+		return errors.New("usage: procly describe <name|id> [--server <name>]")
+	}
+	if server := pickServer(a); server != "" {
+		return remoteDescribe(server, a.pos[0])
 	}
 	c, ok := connect()
 	if !ok {
 		return errors.New("daemon is not running")
 	}
-	in, err := c.Get(argv[0])
+	in, err := c.Get(a.pos[0])
 	if err != nil {
 		return err
 	}
@@ -467,7 +501,14 @@ func cmdDescribe(argv []string) error {
 	return nil
 }
 
-func cmdSave() error {
+func cmdSave(argv []string) error {
+	a, err := parse(argv, withServer(flagSet{}))
+	if err != nil {
+		return err
+	}
+	if server := pickServer(a); server != "" {
+		return remoteSave(server)
+	}
 	c, ok := connect()
 	if !ok {
 		return errors.New("daemon is not running, nothing to save")

@@ -23,10 +23,10 @@ type logFile struct {
 }
 
 func cmdLogs(argv []string) error {
-	a, err := parse(argv, flagSet{
+	a, err := parse(argv, withServer(flagSet{
 		valued: set("lines"),
 		bools:  set("out", "err", "no-follow"),
-	})
+	}))
 	if err != nil {
 		return err
 	}
@@ -35,6 +35,10 @@ func cmdLogs(argv []string) error {
 		if lines, err = strconv.Atoi(v); err != nil || lines < 0 {
 			return errors.New("--lines must be a positive number")
 		}
+	}
+
+	if server := pickServer(a); server != "" {
+		return remoteLogs(server, a.pos, lines, a.bools["out"], a.bools["err"], !a.bools["no-follow"])
 	}
 
 	names, err := logNames(a.pos)
@@ -66,7 +70,7 @@ func cmdLogs(argv []string) error {
 		if lines == 0 {
 			continue
 		}
-		fmt.Println(dim(fmt.Sprintf("  %s  last %d lines", tilde(f.path), lines)))
+		fmt.Println(dim(fmt.Sprintf("  %s  last %d %s", tilde(f.path), lines, plural(lines, "line", "lines"))))
 		for _, l := range tail {
 			printLogLine(f, labelWidth, l)
 		}
@@ -137,8 +141,12 @@ func logNames(targets []string) ([]string, error) {
 }
 
 func printLogLine(f *logFile, labelWidth int, line string) {
-	label := fmt.Sprintf("%-*s |", labelWidth, f.name)
-	if f.stderr {
+	printLabeled(f.name, labelWidth, f.stderr, line)
+}
+
+func printLabeled(name string, labelWidth int, stderr bool, line string) {
+	label := fmt.Sprintf("%-*s |", labelWidth, name)
+	if stderr {
 		label = red(label)
 	} else {
 		label = gray(label)

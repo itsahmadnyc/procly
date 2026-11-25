@@ -144,6 +144,18 @@ The panel shows a tab per server (switch with `[` and `]`), each with its own
 processes, graphs and logs. Unreachable servers are marked instead of slowing
 the others down.
 
+From the terminal, add `--server` (or `-S`) to work on another server:
+
+```sh
+procly ls --server prod-2
+procly logs api -S prod-2
+procly restart all -S prod-2
+export PROCLY_SERVER=prod-2   # make it the default; --server local goes back
+```
+
+It works with `ls`, `describe`, `stop`, `restart`, `delete`, `logs` and `save`.
+`start` stays local: run it on the server itself, then manage it from anywhere.
+
 How it stays safe:
 
 - The agent makes a self-signed certificate on first start. The hub trusts that

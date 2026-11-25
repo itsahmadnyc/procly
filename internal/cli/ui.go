@@ -82,8 +82,13 @@ func renderTable(w io.Writer, headers []string, rows [][]string, right map[int]b
 	}
 }
 
-func printList(w io.Writer, infos []proc.Info) {
+// printList shows processes; server is "" for this machine.
+func printList(w io.Writer, infos []proc.View, server string) {
 	if len(infos) == 0 {
+		if server != "" {
+			fmt.Fprintln(w, dim("  No processes on "+server+"."))
+			return
+		}
 		fmt.Fprintln(w, dim("  No processes. Start one with: procly start app.js"))
 		return
 	}
@@ -95,7 +100,7 @@ func printList(w io.Writer, infos []proc.Info) {
 		pid, up, cpu, mem := "-", "-", "-", "-"
 		if in.PID > 0 {
 			pid = fmt.Sprint(in.PID)
-			up = fmtDuration(time.Since(in.StartedAt))
+			up = fmtDuration(time.Duration(in.UptimeMs) * time.Millisecond)
 			cpu = fmt.Sprintf("%.1f%%", in.CPU)
 			mem = fmtBytes(in.Memory)
 		}
@@ -121,6 +126,9 @@ func printList(w io.Writer, infos []proc.Info) {
 	})
 
 	summary := []string{fmt.Sprintf("%d %s", len(infos), plural(len(infos), "process", "processes"))}
+	if server != "" {
+		summary[0] += " on " + server
+	}
 	for _, s := range []proc.Status{proc.StatusOnline, proc.StatusWaiting, proc.StatusStopped, proc.StatusErrored} {
 		if counts[s] > 0 {
 			summary = append(summary, fmt.Sprintf("%d %s", counts[s], s))
