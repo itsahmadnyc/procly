@@ -1,5 +1,7 @@
 # procly
 
+[![CI](https://github.com/itsahmadnyc/procly/actions/workflows/ci.yml/badge.svg)](https://github.com/itsahmadnyc/procly/actions/workflows/ci.yml)
+
 A process manager for your servers. One small binary, no runtime needed.
 Runs Node, Python, Go, or any other command, restarts it when it crashes,
 keeps its logs, and brings everything back after a reboot.
@@ -248,6 +250,17 @@ State lives in `~/.procly` (override with `PROCLY_HOME`):
   logs/<name>-out.log
   logs/<name>-error.log
 ```
+
+## Development
+
+```sh
+go test -race ./...
+```
+
+Tests start real processes, daemons and TLS connections on localhost, and the
+CLI tests build and run the actual binary. CI runs them on Linux and macOS for
+every push and pull request, checks `gofmt` and `go vet`, and cross-compiles
+for linux/darwin on amd64 and arm64.
 
 ## Roadmap
 

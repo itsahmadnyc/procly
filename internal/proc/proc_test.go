@@ -164,12 +164,27 @@ func TestStopKillsTheWholeProcessGroup(t *testing.T) {
 	}
 	deadline = time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		if err := syscall.Kill(-pgid, 0); errors.Is(err, syscall.ESRCH) {
+		if aliveInGroup(pgid) == 0 {
 			return
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	t.Fatal("child processes outlived stop")
+	t.Fatalf("%d child processes outlived stop", aliveInGroup(pgid))
+}
+
+// aliveInGroup counts processes in a group that are not zombies. Killed
+// children whose parent died are zombies until init reaps them, and in a
+// container without an init that can take forever; they are dead either way.
+func aliveInGroup(pgid int) int {
+	out, _ := exec.Command("pgrep", "-g", strconv.Itoa(pgid)).Output()
+	alive := 0
+	for _, pid := range strings.Fields(string(out)) {
+		stat, err := exec.Command("ps", "-o", "stat=", "-p", pid).Output()
+		if err == nil && !strings.HasPrefix(strings.TrimSpace(string(stat)), "Z") {
+			alive++
+		}
+	}
+	return alive
 }
 
 func TestRestartAndDelete(t *testing.T) {
@@ -349,26 +364,42 @@ func TestShellCommand(t *testing.T) {
 	}
 }
 
-// The tracked PID must be the program itself, also with leading variables,
-// and the variables must reach it.
-func TestEnvPrefixRunsAndIsExeced(t *testing.T) {
+// Leading VAR=value words must reach the program, and the tracked PID must
+// be the program itself, not a wrapper shell. Kept free of ";" and quotes so
+// it means the same in bash (macOS) and dash (Debian/Ubuntu).
+func TestEnvPrefixReachesTheProgram(t *testing.T) {
 	m, dir := newTestManager(t)
-	in, err := m.Start(spec(t, "envd", "GREETING=hello sh -c 'echo $GREETING; exec sleep 30'"))
-	if err != nil {
+	s := spec(t, "printer", "GREETING=hello printenv GREETING")
+	s.AutoRestart = off()
+	if _, err := m.Start(s); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(300 * time.Millisecond)
-	if in2, _ := m.Get("envd"); in2.Status != StatusOnline || in2.PID != in.PID {
-		t.Fatalf("process did not stay up: %+v", in2)
+	if in := waitStatus(t, m, "printer", StatusStopped); in.ExitCode != 0 {
+		t.Fatalf("exit code %d (127 means exec was put before the variable)", in.ExitCode)
 	}
-	out, _ := os.ReadFile(filepath.Join(dir, "envd-out.log"))
+	out, _ := os.ReadFile(filepath.Join(dir, "printer-out.log"))
 	if strings.TrimSpace(string(out)) != "hello" {
 		t.Fatalf("variable did not reach the program: %q", out)
 	}
-	comm, err := exec.Command("ps", "-o", "comm=", "-p", strconv.Itoa(in.PID)).Output()
-	if err != nil || !strings.Contains(string(comm), "sleep") {
-		t.Fatalf("tracked pid runs %q, want the program (sleep), not a wrapper shell", strings.TrimSpace(string(comm)))
+}
+
+func TestEnvPrefixIsExeced(t *testing.T) {
+	m, _ := newTestManager(t)
+	in, err := m.Start(spec(t, "sleeper", "GREETING=hello sleep 30"))
+	if err != nil {
+		t.Fatal(err)
 	}
+	// The shell needs a moment to exec into the program.
+	var comm []byte
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		comm, _ = exec.Command("ps", "-o", "comm=", "-p", strconv.Itoa(in.PID)).Output()
+		if strings.Contains(string(comm), "sleep") {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("tracked pid runs %q, want the program (sleep), not a wrapper shell", strings.TrimSpace(string(comm)))
 }
 
 func TestViewHidesEnvValues(t *testing.T) {
