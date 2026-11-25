@@ -82,6 +82,11 @@ Colors follow your terminal theme. If it guesses light/dark wrong, set
 
 ## Web panel
 
+<picture>
+  <source media="(prefers-color-scheme: light)" srcset="docs/web-light.png">
+  <img alt="procly web panel: process table, CPU and memory graphs, live logs" src="docs/web-dark.png">
+</picture>
+
 ```sh
 procly web                  # http://127.0.0.1:4747
 procly web --port 8080
