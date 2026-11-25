@@ -40,6 +40,12 @@ Processes
   monit                         Live dashboard in the terminal     alias: dash
   web                           Web panel (--addr, --port, --reset-password)
 
+Servers
+  agent                         Let a procly hub manage this server (--port, --reset-token)
+  server add <name> <url> ...   Connect another server's agent to this one
+  server ls                     Connected servers and their status
+  server rm <name>              Disconnect a server
+
 State
   save                          Remember the current process list
   resurrect                     Start everything from the last save
@@ -89,6 +95,10 @@ func Run(argv []string) int {
 		err = cmdMonit()
 	case "web", "panel":
 		err = cmdWeb(rest)
+	case "agent":
+		err = cmdAgent(rest)
+	case "server", "servers":
+		err = cmdServer(rest)
 	case "save":
 		err = cmdSave()
 	case "resurrect":

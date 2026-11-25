@@ -138,6 +138,26 @@ input[type=password], input[type=search] {
 .summary .sep { color: var(--faint); }
 .top-actions { display: flex; gap: 4px; }
 
+.servers {
+  display: flex; gap: 2px; padding: 0 14px; flex-shrink: 0;
+  background: var(--surface); border-bottom: 1px solid var(--border);
+  overflow-x: auto; scrollbar-width: none;
+}
+.server-tab {
+  display: inline-flex; align-items: center; gap: 8px;
+  height: 40px; padding: 0 12px; flex-shrink: 0;
+  border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px;
+  background: none; color: var(--muted);
+  font: 500 13px var(--sans); cursor: pointer;
+}
+.server-tab:hover { color: var(--text); }
+.server-tab[aria-current="true"] { color: var(--text); border-bottom-color: var(--accent); }
+.server-tab .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
+.server-tab .dot.warn { background: var(--amber); }
+.server-tab .dot.down { background: var(--red); }
+.server-tab .count { font-family: var(--mono); font-size: 12px; color: var(--faint); }
+.server-tab .local { font-size: 11px; color: var(--faint); }
+
 .banner {
   padding: 8px 20px; font-size: 13px;
   background: color-mix(in srgb, var(--red) 10%, var(--surface));

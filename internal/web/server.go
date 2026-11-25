@@ -15,16 +15,19 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"sort"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/itsahmadnyc/procly/internal/client"
 	"github.com/itsahmadnyc/procly/internal/logtail"
 	"github.com/itsahmadnyc/procly/internal/paths"
-	"github.com/itsahmadnyc/procly/internal/proc"
+	"github.com/itsahmadnyc/procly/internal/remote"
+	"github.com/itsahmadnyc/procly/internal/sse"
 	"github.com/itsahmadnyc/procly/internal/version"
 )
+
+var errDaemonDown = errors.New("the procly daemon is not running")
 
 //go:embed assets
 var assets embed.FS
@@ -38,9 +41,9 @@ type Options struct {
 }
 
 type server struct {
-	c    *client.Client
-	auth *auth
-	host string
+	servers *registry
+	auth    *auth
+	host    string
 }
 
 // Run serves the panel until SIGINT/SIGTERM.
@@ -53,7 +56,7 @@ func Run(opts Options) error {
 		return err
 	}
 	host, _ := os.Hostname()
-	s := &server{c: client.New(), auth: a, host: host}
+	s := &server{servers: newRegistry(localBackend{client.New()}), auth: a, host: host}
 
 	ln, err := net.Listen("tcp", opts.Addr)
 	if err != nil {
@@ -119,10 +122,11 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("POST /api/login", s.csrf(s.login))
 	mux.HandleFunc("POST /api/logout", s.csrf(s.logout))
 	mux.HandleFunc("GET /api/info", s.private(s.info))
-	mux.HandleFunc("GET /api/processes", s.private(s.list))
-	mux.HandleFunc("POST /api/processes/{name}/{action}", s.private(s.csrf(s.action)))
-	mux.HandleFunc("GET /api/processes/{name}/logs", s.private(s.logs))
-	mux.HandleFunc("POST /api/save", s.private(s.csrf(s.save)))
+	mux.HandleFunc("GET /api/servers", s.private(s.serverList))
+	mux.HandleFunc("GET /api/servers/{server}/processes", s.private(s.withBackend(s.list)))
+	mux.HandleFunc("POST /api/servers/{server}/processes/{name}/{action}", s.private(s.csrf(s.withBackend(s.action))))
+	mux.HandleFunc("GET /api/servers/{server}/processes/{name}/logs", s.private(s.withBackend(s.logs)))
+	mux.HandleFunc("POST /api/servers/{server}/save", s.private(s.csrf(s.withBackend(s.save))))
 
 	return secureHeaders(mux)
 }
@@ -219,179 +223,167 @@ func (s *server) logout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) info(w http.ResponseWriter, r *http.Request) {
-	resp := map[string]any{"host": s.host, "version": version.Version}
-	if p, err := s.c.Ping(); err == nil {
-		resp["daemon"] = p
+	writeJSON(w, http.StatusOK, map[string]any{"host": s.host, "version": version.Version})
+}
+
+type backendHandler func(w http.ResponseWriter, r *http.Request, b backend, server string)
+
+func (s *server) withBackend(h backendHandler) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		name := r.PathValue("server")
+		b, ok := s.servers.get(name)
+		if !ok {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown server " + name})
+			return
+		}
+		h(w, r, b, name)
+	}
+}
+
+type serverStatus struct {
+	Name     string         `json:"name"`
+	Label    string         `json:"label"`
+	Local    bool           `json:"local"`
+	URL      string         `json:"url,omitempty"`
+	OK       bool           `json:"ok"`
+	Error    string         `json:"error,omitempty"`
+	Total    int            `json:"total"`
+	ByStatus map[string]int `json:"by_status"`
+}
+
+// serverList checks every server in parallel, each with a short timeout,
+// so one unreachable machine can't stall the panel.
+func (s *server) serverList(w http.ResponseWriter, r *http.Request) {
+	entries, regErr := s.servers.all()
+	out := make([]serverStatus, len(entries))
+	var wg sync.WaitGroup
+	for i, e := range entries {
+		out[i] = serverStatus{Name: e.name, Label: e.name, Local: e.name == remote.LocalName, URL: e.url, ByStatus: map[string]int{}}
+		if out[i].Local {
+			out[i].Label = s.host
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
+			defer cancel()
+			views, err := e.backend.List(ctx)
+			if err != nil {
+				out[i].Error = friendly(err)
+				return
+			}
+			out[i].OK = true
+			out[i].Total = len(views)
+			for _, v := range views {
+				out[i].ByStatus[string(v.Status)]++
+			}
+		}()
+	}
+	wg.Wait()
+	resp := map[string]any{"servers": out}
+	if regErr != nil {
+		resp["error"] = regErr.Error()
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// procView is what the browser sees. Environment values stay on the server;
-// only the variable names are sent.
-type procView struct {
-	ID          int         `json:"id"`
-	Name        string      `json:"name"`
-	Status      proc.Status `json:"status"`
-	PID         int         `json:"pid"`
-	Restarts    int         `json:"restarts"`
-	UptimeMs    int64       `json:"uptime_ms"`
-	ExitCode    int         `json:"exit_code"`
-	CPU         float64     `json:"cpu"`
-	Memory      int64       `json:"memory"`
-	Command     string      `json:"command"`
-	Cwd         string      `json:"cwd"`
-	AutoRestart bool        `json:"autorestart"`
-	EnvKeys     []string    `json:"env_keys"`
-}
-
-func view(in proc.Info) procView {
-	v := procView{
-		ID: in.ID, Name: in.Name, Status: in.Status, PID: in.PID, Restarts: in.Restarts,
-		ExitCode: in.ExitCode, CPU: in.CPU, Memory: in.Memory,
-		Command: in.Spec.Command, Cwd: in.Spec.Cwd, AutoRestart: in.Spec.ShouldAutoRestart(),
-		EnvKeys: []string{},
-	}
-	if in.PID > 0 && !in.StartedAt.IsZero() {
-		v.UptimeMs = time.Since(in.StartedAt).Milliseconds()
-	}
-	for k := range in.Spec.Env {
-		if k != "PATH" {
-			v.EnvKeys = append(v.EnvKeys, k)
-		}
-	}
-	sort.Strings(v.EnvKeys)
-	return v
-}
-
-func (s *server) list(w http.ResponseWriter, r *http.Request) {
-	infos, err := s.c.List()
+func (s *server) list(w http.ResponseWriter, r *http.Request, b backend, server string) {
+	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+	defer cancel()
+	views, err := b.List(ctx)
 	if err != nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "daemon is not running"})
+		writeError(w, server, err)
 		return
 	}
-	out := make([]procView, len(infos))
-	for i, in := range infos {
-		out[i] = view(in)
-	}
-	writeJSON(w, http.StatusOK, out)
+	writeJSON(w, http.StatusOK, views)
 }
 
-func (s *server) action(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
+func (s *server) action(w http.ResponseWriter, r *http.Request, b backend, server string) {
+	name, verb := r.PathValue("name"), r.PathValue("action")
 	if name == "all" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "act on one process at a time"})
 		return
 	}
-	var err error
-	switch r.PathValue("action") {
-	case "restart", "start":
-		_, err = s.c.Restart(name)
-	case "stop":
-		_, err = s.c.Stop(name)
-	case "delete":
-		_, err = s.c.Delete(name)
+	switch verb {
+	case "restart", "start", "stop", "delete":
 	default:
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown action"})
 		return
 	}
-	if err != nil {
-		code := http.StatusServiceUnavailable // daemon unreachable
-		var apiErr *client.APIError
-		if errors.As(err, &apiErr) {
-			code = apiErr.Status
-		}
-		writeJSON(w, code, map[string]string{"error": err.Error()})
+	if err := b.Action(r.Context(), name, verb); err != nil {
+		writeError(w, server, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
-func (s *server) save(w http.ResponseWriter, r *http.Request) {
-	n, _, err := s.c.Save()
+func (s *server) save(w http.ResponseWriter, r *http.Request, b backend, server string) {
+	n, err := b.Save(r.Context())
 	if err != nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": err.Error()})
+		writeError(w, server, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]int{"saved": n})
 }
 
-type logEvent struct {
-	Stream string `json:"s"` // "o" stdout, "e" stderr
-	Line   string `json:"l"`
-}
-
-// logs streams a process's output as server-sent events: recent history
-// first, then new lines as they are written.
-func (s *server) logs(w http.ResponseWriter, r *http.Request) {
-	info, err := s.c.Get(r.PathValue("name"))
-	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "process not found"})
-		return
-	}
-	flusher, ok := w.(http.Flusher)
+// logs relays a process's output as server-sent events, whether it comes
+// from local files or from an agent's stream.
+func (s *server) logs(w http.ResponseWriter, r *http.Request, b backend, server string) {
+	send, ok := sse.Writer(w)
 	if !ok {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "streaming unsupported"})
 		return
 	}
-	h := w.Header()
-	h.Set("Content-Type", "text/event-stream")
-	h.Set("X-Accel-Buffering", "no")
+	started := false
+	err := b.Logs(r.Context(), r.PathValue("name"), func(batch []logtail.Event) bool {
+		started = true
+		return send(batch)
+	})
+	if err != nil && !started {
+		// Nothing streamed yet, so a normal error response still fits.
+		w.Header().Set("Content-Type", "application/json")
+		writeError(w, server, err)
+	}
+}
 
-	send := func(batch []logEvent) bool {
-		if len(batch) == 0 {
-			return true
-		}
-		data, _ := json.Marshal(batch)
-		if _, err := fmt.Fprintf(w, "data: %s\n\n", data); err != nil {
-			return false
-		}
-		flusher.Flush()
-		return true
-	}
-
-	// Paths come from the daemon, never from the request.
-	outTail, outSize := logtail.Tail(info.OutLog, 300)
-	errTail, errSize := logtail.Tail(info.ErrLog, 300)
-	var history []logEvent
-	for _, l := range outTail {
-		history = append(history, logEvent{"o", l})
-	}
-	for _, l := range errTail {
-		history = append(history, logEvent{"e", l})
-	}
-	fmt.Fprint(w, ": history\n\n")
-	if !send(history) {
-		return
-	}
-	outF := logtail.NewFollower(info.OutLog, outSize)
-	errF := logtail.NewFollower(info.ErrLog, errSize)
-
-	tick := time.NewTicker(300 * time.Millisecond)
-	defer tick.Stop()
-	keepalive := time.NewTicker(15 * time.Second)
-	defer keepalive.Stop()
-	for {
-		select {
-		case <-r.Context().Done():
-			return
-		case <-keepalive.C:
-			if _, err := fmt.Fprint(w, ": ping\n\n"); err != nil {
-				return
-			}
-			flusher.Flush()
-		case <-tick.C:
-			var batch []logEvent
-			for _, l := range outF.Read() {
-				batch = append(batch, logEvent{"o", l})
-			}
-			for _, l := range errF.Read() {
-				batch = append(batch, logEvent{"e", l})
-			}
-			if !send(batch) {
-				return
-			}
+// writeError maps backend errors to HTTP codes the frontend understands.
+func writeError(w http.ResponseWriter, server string, err error) {
+	code := http.StatusBadGateway
+	var apiErr *client.APIError
+	var remoteErr *remote.StatusError
+	switch {
+	case errors.Is(err, errDaemonDown):
+		code = http.StatusServiceUnavailable
+	case errors.As(err, &apiErr):
+		code = apiErr.Status
+	case errors.As(err, &remoteErr):
+		code = remoteErr.Code
+		if code == http.StatusUnauthorized {
+			code = http.StatusBadGateway // the agent rejected our token, not the browser's session
 		}
 	}
+	msg := friendly(err)
+	if server != remote.LocalName {
+		msg = server + ": " + msg
+	}
+	writeJSON(w, code, map[string]string{"error": msg})
+}
+
+func friendly(err error) string {
+	var remoteErr *remote.StatusError
+	switch {
+	case errors.Is(err, remote.ErrFingerprint):
+		return "certificate fingerprint does not match the one saved with 'procly server add'"
+	case errors.As(err, &remoteErr) && remoteErr.Code == http.StatusUnauthorized:
+		return "the agent rejected the token"
+	case errors.Is(err, context.DeadlineExceeded):
+		return "timed out"
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return "unreachable (" + netErr.Error() + ")"
+	}
+	return err.Error()
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {

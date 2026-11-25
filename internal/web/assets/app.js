@@ -5,16 +5,21 @@
 // inject markup.
 
 const POLL_MS = 2000;
+const SERVERS_POLL_MS = 5000;
 const HISTORY = 60;
 const LOG_KEEP = 3000;
 
 const $ = (id) => document.getElementById(id);
 
 const state = {
+  server: "local",
+  servers: [],
+  host: "",
+  serverTimer: null,
   procs: [],
   sel: null,
   filter: "",
-  hist: new Map(), // name -> {pid, cpu: [], mem: []}
+  hist: new Map(), // "server/name" -> {pid, cpu: [], mem: []}
   busy: new Map(), // name -> verb
   stream: null,
   streamName: null,
@@ -24,6 +29,9 @@ const state = {
 };
 
 // ---------- api ----------
+
+const base = () => `/api/servers/${encodeURIComponent(state.server)}`;
+const histKey = (name) => `${state.server}\u0000${name}`;
 
 class AuthError extends Error {}
 
@@ -115,34 +123,104 @@ $("logout-btn").addEventListener("click", async () => {
 async function startApp() {
   try {
     const info = await api("GET", "/api/info");
-    $("host").textContent = info.host || "";
-    document.title = info.host ? `procly · ${info.host}` : "procly";
+    state.host = info.host || "";
+    $("host").textContent = state.host;
   } catch (err) {
     if (err instanceof AuthError) return showLogin();
   }
   $("login").hidden = true;
   $("app").hidden = false;
-  await refresh();
+  await Promise.all([refreshServers(), refresh()]);
   startPolling();
 }
 
 function startPolling() {
   stopPolling();
   state.pollTimer = setInterval(refresh, POLL_MS);
+  state.serverTimer = setInterval(refreshServers, SERVERS_POLL_MS);
 }
 
 function stopPolling() {
-  if (state.pollTimer) clearInterval(state.pollTimer);
-  state.pollTimer = null;
+  clearInterval(state.pollTimer);
+  clearInterval(state.serverTimer);
+  state.pollTimer = state.serverTimer = null;
+}
+
+// ---------- servers ----------
+
+async function refreshServers() {
+  let data;
+  try {
+    data = await api("GET", "/api/servers");
+  } catch (err) {
+    if (err instanceof AuthError) return showLogin("Your session ended. Sign in again.");
+    return;
+  }
+  state.servers = data.servers || [];
+  if (!state.servers.some((s) => s.name === state.server)) switchServer("local");
+  renderServers();
+}
+
+function serverLabel(name) {
+  const s = state.servers.find((x) => x.name === name);
+  return s ? s.label : name;
+}
+
+function renderServers() {
+  const nav = $("servers");
+  const multi = state.servers.length > 1;
+  nav.hidden = !multi;
+  $("host").textContent = multi ? serverLabel(state.server) : state.host;
+  document.title = `procly · ${serverLabel(state.server) || "procly"}`;
+  if (!multi) return;
+  nav.replaceChildren();
+  for (const s of state.servers) {
+    const tab = el("button", "server-tab");
+    tab.type = "button";
+    tab.dataset.server = s.name;
+    if (s.name === state.server) tab.setAttribute("aria-current", "true");
+    const problems = (s.by_status.errored || 0) + (s.by_status.waiting || 0);
+    const dot = el("span", "dot" + (!s.ok ? " down" : problems ? " warn" : ""));
+    tab.title = s.ok ? `${s.total} processes` : s.error;
+    tab.append(dot, el("span", "", s.label));
+    if (s.local) tab.append(el("span", "local", "this server"));
+    tab.append(el("span", "count", s.ok ? String(s.total) : "–"));
+    nav.append(tab);
+  }
+}
+
+$("servers").addEventListener("click", (e) => {
+  const tab = e.target.closest(".server-tab");
+  if (tab) switchServer(tab.dataset.server);
+});
+
+function switchServer(name) {
+  if (name === state.server) return;
+  state.server = name;
+  state.procs = [];
+  state.sel = null;
+  state.filter = "";
+  $("filter").value = "";
+  closeStream();
+  setDaemonDown(false);
+  renderServers();
+  render();
+  refresh();
 }
 
 async function refresh() {
   try {
-    state.procs = await api("GET", "/api/processes");
+    const server = state.server;
+    const procs = await api("GET", `${base()}/processes`);
+    if (server !== state.server) return; // switched while loading
+    state.procs = procs;
     setDaemonDown(false);
   } catch (err) {
     if (err instanceof AuthError) return showLogin("Your session ended. Sign in again.");
-    setDaemonDown(true, err.status === 503 ? "The procly daemon is not running on this server." : "Can't reach the panel server.");
+    state.procs = [];
+    closeStream();
+    setDaemonDown(true, err.status ? err.message : "Can't reach the panel server.");
+    render();
     return;
   }
   record();
@@ -160,18 +238,19 @@ function setDaemonDown(down, msg) {
 function record() {
   const seen = new Set();
   for (const p of state.procs) {
-    seen.add(p.name);
+    seen.add(histKey(p.name));
     if (!p.pid) continue;
-    let h = state.hist.get(p.name);
+    let h = state.hist.get(histKey(p.name));
     if (!h || h.pid !== p.pid) { // a new run starts a new graph
       h = { pid: p.pid, cpu: [], mem: [] };
-      state.hist.set(p.name, h);
+      state.hist.set(histKey(p.name), h);
     }
     h.cpu.push(p.cpu);
     h.mem.push(p.memory);
     if (h.cpu.length > HISTORY) { h.cpu.shift(); h.mem.shift(); }
   }
-  for (const name of state.hist.keys()) if (!seen.has(name)) state.hist.delete(name);
+  const prefix = histKey("");
+  for (const key of state.hist.keys()) if (key.startsWith(prefix) && !seen.has(key)) state.hist.delete(key);
 }
 
 function selected() {
@@ -194,6 +273,7 @@ function render() {
 function renderSummary() {
   const box = $("summary");
   box.replaceChildren();
+  if (state.daemonDown) return; // counts would read as "0 processes"
   const counts = {};
   for (const p of state.procs) counts[p.status] = (counts[p.status] || 0) + 1;
   const n = state.procs.length;
@@ -237,7 +317,7 @@ function renderTable() {
   const empty = $("empty");
   empty.replaceChildren();
   if (!state.procs.length && !state.daemonDown) {
-    empty.append(el("div", "", "No processes yet. Start one on the server:"), el("code", "", "procly start app.js"));
+    empty.append(el("div", "", `No processes on ${serverLabel(state.server)} yet. Start one there:`), el("code", "", "procly start app.js"));
     empty.hidden = false;
   } else if (state.procs.length && !list.length) {
     empty.append(el("div", "", "No process matches the filter."));
@@ -298,13 +378,13 @@ function renderDetail() {
   toggle.querySelector("span").textContent = running ? "Stop" : "Start";
   for (const id of ["act-restart", "act-toggle", "act-delete"]) $(id).disabled = !!verb;
 
-  const h = state.hist.get(p.name);
+  const h = state.hist.get(histKey(p.name));
   $("m-cpu").textContent = p.pid ? p.cpu.toFixed(1) + "%" : "–";
   $("m-mem").textContent = p.pid ? fmtBytes(p.memory) : "–";
   drawSpark($("s-cpu"), h ? h.cpu : [], { fromZero: true, minSpan: 10 });
   drawSpark($("s-mem"), h ? h.mem : [], { fromZero: false, minSpan: 8 * 1024 * 1024 });
 
-  if (state.streamName !== p.name) openStream(p.name);
+  if (state.streamName !== histKey(p.name)) openStream(p.name);
 }
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -340,8 +420,8 @@ async function act(verb, name) {
   state.busy.set(name, verb);
   render();
   try {
-    await api("POST", `/api/processes/${encodeURIComponent(name)}/${verb}`);
-    toast(`${past[verb]} ${name}`);
+    await api("POST", `${base()}/processes/${encodeURIComponent(name)}/${verb}`);
+    toast(`${past[verb]} ${name}` + (state.server === "local" ? "" : ` on ${serverLabel(state.server)}`));
   } catch (err) {
     if (err instanceof AuthError) return showLogin("Your session ended. Sign in again.");
     toast(err.message, true);
@@ -375,8 +455,8 @@ $("act-delete").addEventListener("click", () => state.sel && act("delete", state
 
 $("save-btn").addEventListener("click", async () => {
   try {
-    const r = await api("POST", "/api/save");
-    toast(`Saved ${r.saved} ${r.saved === 1 ? "process" : "processes"}. They come back after a reboot.`);
+    const r = await api("POST", `${base()}/save`);
+    toast(`Saved ${r.saved} ${r.saved === 1 ? "process" : "processes"} on ${serverLabel(state.server)}. They come back after a reboot.`);
   } catch (err) {
     if (err instanceof AuthError) return showLogin();
     toast(err.message, true);
@@ -413,10 +493,10 @@ function openStream(name) {
   log.replaceChildren();
   state.follow = true;
   $("jump").hidden = true;
-  state.streamName = name;
+  state.streamName = histKey(name);
   setStreamState("connecting…");
 
-  const es = new EventSource(`/api/processes/${encodeURIComponent(name)}/logs`);
+  const es = new EventSource(`${base()}/processes/${encodeURIComponent(name)}/logs`);
   state.stream = es;
   let first = true;
   es.onopen = () => setStreamState("live", true);
@@ -489,6 +569,13 @@ document.addEventListener("keydown", (e) => {
       if (list.length) { e.preventDefault(); select(list[Math.max(i - 1, 0)].name); }
       break;
     case "r": if (state.sel) act("restart", state.sel); break;
+    case "[": case "]": {
+      if (state.servers.length < 2) break;
+      const idx = state.servers.findIndex((s) => s.name === state.server);
+      const next = (idx + (e.key === "]" ? 1 : -1) + state.servers.length) % state.servers.length;
+      switchServer(state.servers[next].name);
+      break;
+    }
     case "s": toggleSelected(); break;
   }
 });
@@ -496,7 +583,7 @@ document.addEventListener("keydown", (e) => {
 document.addEventListener("visibilitychange", () => {
   if ($("app").hidden) return;
   if (document.hidden) stopPolling();
-  else { refresh(); startPolling(); }
+  else { refresh(); refreshServers(); startPolling(); }
 });
 
 // ---------- boot ----------

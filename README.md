@@ -9,7 +9,7 @@ keeps its logs, and brings everything back after a reboot.
   <img alt="procly monit: live process table, CPU and memory sparklines, and streaming logs" src="docs/monit-dark.png">
 </picture>
 
-> Status: early MVP. The CLI, daemon, terminal dashboard and web panel work; multi-server support is next.
+> Status: early MVP. The CLI, daemon, terminal dashboard, web panel and multi-server support work.
 
 ## Install
 
@@ -55,6 +55,8 @@ procly ls
 | `procly logs [name]` | Print recent lines and follow |
 | `procly monit` | Live dashboard: processes, CPU/memory graphs, logs |
 | `procly web` | Web panel for the same, in the browser |
+| `procly agent` | Let another server's panel manage this one |
+| `procly server add/ls/rm` | Connect, list and remove other servers |
 | `procly save` / `procly resurrect` | Remember the process list / bring it back |
 | `procly startup` | Start on boot (systemd on Linux, launchd on macOS) |
 | `procly kill` | Stop all processes and the daemon |
@@ -120,6 +122,40 @@ Security: sessions are HttpOnly, SameSite=Strict cookies; every write needs an
 `X-Procly` header (CSRF); five wrong passwords lock an IP out for ten minutes;
 environment variable values never leave the server, only their names.
 
+## Several servers
+
+One panel can manage many machines. On every extra server, run the agent:
+
+```sh
+procly agent                # listens on 0.0.0.0:4748 over TLS
+```
+
+It prints a one-time token and its certificate fingerprint, ready to paste on
+the server that runs `procly web`:
+
+```sh
+procly server add prod-2 https://203.0.113.7:4748 \
+  --token <token> \
+  --fingerprint sha256:<fingerprint>
+procly server ls
+```
+
+The panel shows a tab per server (switch with `[` and `]`), each with its own
+processes, graphs and logs. Unreachable servers are marked instead of slowing
+the others down.
+
+How it stays safe:
+
+- The agent makes a self-signed certificate on first start. The hub trusts that
+  exact certificate by fingerprint, so nobody in between can pose as the agent,
+  and the token is never sent to a server with a different certificate.
+- The token is 256 random bits. The agent stores only its SHA-256; the hub keeps
+  it in `~/.procly/servers.json` (mode 600). New token: `procly agent --reset-token`.
+- An agent can list, restart, stop, start, delete and stream logs. It cannot
+  start new commands.
+- Open the agent port only to your panel server in the firewall, for example
+  `ufw allow from <panel-ip> to any port 4748`.
+
 ## Config file
 
 ```yaml
@@ -172,7 +208,7 @@ State lives in `~/.procly` (override with `PROCLY_HOME`):
 - [x] Daemon, auto-restart with backoff, logs, CPU/memory, config file, save/resurrect, boot startup
 - [x] Interactive terminal UI (`procly monit`)
 - [x] Web panel, embedded in the binary
-- [ ] Connect several servers to one panel
+- [x] Connect several servers to one panel
 - [ ] Log rotation, health checks, alerts, deploy from git
 
 ## License
