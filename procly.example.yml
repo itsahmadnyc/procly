@@ -1,0 +1,9 @@
+apps:
+  - name: api
+    command: node server.js
+    cwd: ./api
+    env:
+      PORT: 3000
+  - name: worker
+    command: python3 worker.py
+    max_restarts: 5
