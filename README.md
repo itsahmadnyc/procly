@@ -31,7 +31,7 @@ across as many servers as you have.
 - **Many servers, one panel.** Connect servers directly, or let ones behind NAT
   dial in. Every connection pins a certificate; nothing trusts a CA.
 - **Survives a reboot.** `procly save`, then `procly startup` for systemd or launchd.
-- **Small.** A single binary of about 10 MB, and a daemon that idles around 8 MB. No Node needed to run it.
+- **Small.** A single binary of about 10 MB, and a daemon of about 11 MB with ten apps running. No Node needed to run it.
 
 ## Install
 
@@ -375,17 +375,20 @@ Same machine, same ten apps (a small Node HTTP server each), median of three run
 
 | | procly | PM2 |
 |---|---|---|
-| Install size | 9.4 MB, one binary, no runtime | 16.7 MB of node_modules, plus Node (117 MB) |
-| Daemon memory, 10 apps running | **8.2 MB** | 63.0 MB |
-| Memory of the 10 apps themselves | 465 MB | 572 MB |
-| Start command to first HTTP response | **95 ms** | 234 ms |
-| `ls` | **7 ms** | 54 ms |
+| Install size | 9.9 MB, one binary, no runtime | 16.7 MB of node_modules, plus Node (127 MB) |
+| Daemon memory, 10 apps running | **11.4 MB** | 77.0 MB |
+| Memory of the 10 apps themselves | 494 MB | 658 MB |
+| Start command to first HTTP response | **200 ms** | 820 ms |
+| `ls` | **56 ms** | 348 ms |
 
-PM2 7.1.2 in fork mode, Node 22, procly 0.2.0, Linux arm64 with 4 CPUs (a Docker
-container in a VM, not bare metal, so absolute numbers will differ on your
-server). PM2 runs each app inside its own Node wrapper, which is where the extra
-app memory comes from. Run it yourself with [`scripts/bench.sh`](scripts/bench.sh):
-it installs PM2 into a temporary folder and leaves your setup alone.
+Measured on a Linux x86_64 server (Ubuntu 24.04, 12 CPUs) that was also running
+other workloads, with the benchmark at the lowest priority: PM2 7.1.2 in fork
+mode, Node 24, procly built from `main` after 0.3.0. An earlier run in a Docker
+container on an Apple-silicon Mac gave smaller numbers for both tools, with procly ahead
+on every row, so expect the absolute values to move with your hardware. PM2 runs
+each app inside its own Node wrapper, which is where the extra app memory comes
+from. Run it yourself with [`scripts/bench.sh`](scripts/bench.sh): it installs
+PM2 into a temporary folder and leaves your setup alone.
 
 ## How it works
 
