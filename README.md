@@ -31,7 +31,7 @@ across as many servers as you have.
 - **Many servers, one panel.** Connect servers directly, or let ones behind NAT
   dial in. Every connection pins a certificate; nothing trusts a CA.
 - **Survives a reboot.** `procly save`, then `procly startup` for systemd or launchd.
-- **Small.** A single binary of about 10 MB, and a daemon that stays around 10 MB with ten apps running. No Node needed to run it.
+- **Small.** A single binary of about 10 MB, and a daemon of about 11 MB with ten apps running. No Node needed to run it.
 
 ## Install
 
