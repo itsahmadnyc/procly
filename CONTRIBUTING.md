@@ -100,6 +100,11 @@ go test -race ./...
    hyphen (`v0.5.0-rc1`) is published as a pre-release.
 3. Publish to npm from your own terminal, because it needs 2FA:
    `scripts/npm-release.sh X.Y.Z --publish`.
+4. Update the Homebrew formula in
+   [itsahmadnyc/homebrew-tap](https://github.com/itsahmadnyc/homebrew-tap): in a
+   clone of it, run `scripts/brew-formula.sh X.Y.Z > Formula/procly.rb` (from this
+   repository; it reads the checksums from the release), check it with
+   `brew audit --strict --online itsahmadnyc/tap/procly` and push.
 
 To try the whole thing without publishing, run the workflow by hand
 (`gh workflow run release.yml`): it builds and checks everything and keeps the
