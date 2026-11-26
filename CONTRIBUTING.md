@@ -83,4 +83,27 @@ go test -race ./...
 - Commit messages: a short subject in the imperative ("Add log search"), and a
   few lines on *why* when it isn't obvious.
 
+## Releasing (maintainers)
+
+1. Add a `## vX.Y.Z` section to `CHANGELOG.md` and merge it through a pull
+   request. The release notes are that section, so a release with no section is
+   refused.
+2. Tag `main` and push the tag:
+
+   ```sh
+   git tag -a vX.Y.Z -m "procly vX.Y.Z" && git push origin vX.Y.Z
+   ```
+
+   The Release workflow runs the tests, builds the four archives and
+   `checksums.txt` with `scripts/release.sh`, checks them, and publishes the
+   GitHub release. A tag that is not on `main` is refused, and a tag with a
+   hyphen (`v0.5.0-rc1`) is published as a pre-release.
+3. Publish to npm from your own terminal, because it needs 2FA:
+   `scripts/npm-release.sh X.Y.Z --publish`.
+
+To try the whole thing without publishing, run the workflow by hand
+(`gh workflow run release.yml`): it builds and checks everything and keeps the
+files as a workflow artifact for a week. Release tags can't be moved or deleted
+once pushed, so read the changelog before you tag.
+
 By contributing you agree that your work is released under the [MIT license](LICENSE).
