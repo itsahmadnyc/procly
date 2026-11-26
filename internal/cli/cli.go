@@ -42,7 +42,8 @@ Processes
   logs [name|id]                Print and follow logs
   monit                         Live dashboard in the terminal     alias: dash
   web                           Web panel (--addr, --port, --reset-password,
-                                --trusted-proxy <addr|range>, repeatable)
+                                --trusted-proxy <addr|range>, repeatable,
+                                --tls-cert <file> --tls-key <file> to serve HTTPS)
 
 Alerts
   alerts                        Telegram/Slack messages on crashes and failed health checks
@@ -730,7 +731,7 @@ func cmdMonit() error {
 
 func cmdWeb(argv []string) error {
 	a, err := parse(argv, flagSet{
-		valued: set("addr", "port", "trusted-proxy"),
+		valued: set("addr", "port", "trusted-proxy", "tls-cert", "tls-key"),
 		bools:  set("reset-password"),
 	})
 	if err != nil {
@@ -753,7 +754,15 @@ func cmdWeb(argv []string) error {
 	if _, err := ensureDaemon(); err != nil {
 		return err
 	}
-	return web.Run(web.Options{Addr: addr, ResetPassword: a.bools["reset-password"], TrustedProxies: a.values["trusted-proxy"], Out: os.Stdout})
+	cert, key := a.get("tls-cert"), a.get("tls-key")
+	for _, p := range []*string{&cert, &key} {
+		if *p != "" {
+			if abs, err := filepath.Abs(*p); err == nil {
+				*p = abs // a reload later must find the same file, wherever we are
+			}
+		}
+	}
+	return web.Run(web.Options{Addr: addr, ResetPassword: a.bools["reset-password"], TrustedProxies: a.values["trusted-proxy"], TLSCert: cert, TLSKey: key, Out: os.Stdout})
 }
 
 func cmdDaemon(argv []string) error {

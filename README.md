@@ -190,6 +190,29 @@ Nothing is trusted by default, and the header from any other address is ignored,
 anyone can write it. Trust only the addresses your proxy connects from; the panel warns if
 you trust every address.
 
+### Serving HTTPS yourself
+
+```sh
+procly web --addr 0.0.0.0:8443 --tls-cert /etc/letsencrypt/live/panel.example.com/fullchain.pem \
+                               --tls-key  /etc/letsencrypt/live/panel.example.com/privkey.pem
+```
+
+The panel then speaks HTTPS (TLS 1.2 or newer, HTTP/2 too) and the session cookie is `Secure`.
+Both flags are needed, and a certificate that cannot be loaded stops the panel at start
+with the reason. Use this when the panel is the only web service on the machine and you
+have a certificate for it; use a reverse proxy (above) when the machine already serves
+other sites on 443, when you want a redirect from HTTP, or when you would like the proxy to
+get and renew certificates for you (Caddy does). Port 443 needs root or a capability, so a
+high port is easier.
+
+Renewed certificates need no restart. The panel looks at the two files every ten seconds and
+loads the new pair when they change; a pair that does not load (a renewal writes the
+certificate and the key one after the other) is reported once and the previous certificate
+keeps being served until a good pair appears. It also loads them again on `SIGHUP`, for a
+renewal hook: start the panel with `--reload-signal SIGHUP`, e.g.
+`procly start "procly web --addr 0.0.0.0:8443 --tls-cert ... --tls-key ..." --name panel --reload-signal SIGHUP`,
+and run `procly reload panel` from certbot's `--deploy-hook`.
+
 To keep the panel running, start it once by hand to note the password, stop it, then let procly run it:
 `procly start "procly web" --name panel`.
 
