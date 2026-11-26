@@ -30,6 +30,8 @@ type View struct {
 	MaxRestarts    int    `json:"max_restarts"`
 	RestartDelayMs int64  `json:"restart_delay_ms"`
 	KillTimeoutMs  int64  `json:"kill_timeout_ms"`
+	RestartEvery   string `json:"restart_every,omitempty"`
+	RestartAt      string `json:"restart_at,omitempty"`
 	StopSignal     string `json:"stop_signal,omitempty"`   // as configured, empty for SIGTERM
 	ReloadSignal   string `json:"reload_signal,omitempty"` // empty: the process cannot be reloaded
 	MaxMemory      int64  `json:"max_memory,omitempty"`    // bytes, 0: no limit
@@ -65,6 +67,7 @@ func NewView(in Info) View {
 	v.MaxRestarts = in.Spec.MaxRestartsOrDefault()
 	v.RestartDelayMs = in.Spec.restartDelay().Milliseconds()
 	v.KillTimeoutMs = in.Spec.killTimeout().Milliseconds()
+	v.RestartEvery, v.RestartAt = in.Spec.RestartEvery, in.Spec.RestartAt
 	v.StopSignal, v.ReloadSignal = SignalName(in.Spec.StopSignal), SignalName(in.Spec.ReloadSignal)
 	v.MaxMemory, _ = in.Spec.maxMemoryBytes()
 	v.LogMaxBytes, v.LogKeep = in.Spec.logLimits()

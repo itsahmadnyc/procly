@@ -629,3 +629,37 @@ func TestCLIReloadAndSignals(t *testing.T) {
 	c.ok("start", "sleep 31", "--name", "flagged", "--reload-signal", "usr1", "--stop-signal", "HUP")
 	contains(t, c.ok("describe", "flagged"), "SIGUSR1", "SIGHUP")
 }
+
+func TestCLIScheduledRestartSettings(t *testing.T) {
+	c := newCLI(t)
+	// Mistakes are refused when the process starts, naming the setting.
+	for _, bad := range []struct{ flag, value, want string }{
+		{"--restart-every", "24", "with a unit"},
+		{"--restart-every", "10s", "too short"},
+		{"--restart-at", "25:00", "time of day"},
+		{"--restart-at", "4pm", "time of day"},
+	} {
+		out := c.fails("start", "sleep 30", "--name", "bad", bad.flag, bad.value)
+		contains(t, out, strings.ReplaceAll(strings.TrimPrefix(bad.flag, "--"), "-", "_"), bad.want)
+	}
+	c.file("procly.yml", "apps:\n  - name: nightly\n    command: sleep 30\n    restart_every: 24h\n    restart_at: \"04:00\"\n")
+	c.ok("start", "procly.yml")
+	out := c.ok("describe", "nightly")
+	contains(t, out, "restart every", "24h", "restart at", "04:00", "server's local time")
+
+	var v struct {
+		Every string `json:"restart_every"`
+		At    string `json:"restart_at"`
+	}
+	if err := json.Unmarshal([]byte(c.ok("describe", "nightly", "--json")), &v); err != nil || v.Every != "24h" || v.At != "04:00" {
+		t.Errorf("describe --json: %+v (%v)", v, err)
+	}
+	// The flags work too, and the schedule is kept by save and resurrect.
+	c.ok("start", "sleep 31", "--name", "byflag", "--restart-at", "03:30")
+	contains(t, c.ok("describe", "byflag"), "restart at", "03:30")
+	c.ok("save")
+	c.ok("kill")
+	c.ok("resurrect")
+	contains(t, c.ok("describe", "nightly"), "24h", "04:00")
+	contains(t, c.ok("describe", "byflag"), "03:30")
+}

@@ -29,6 +29,12 @@ type Spec struct {
 	RestartDelayMs int        `json:"restart_delay_ms,omitempty" yaml:"restart_delay_ms"`
 	KillTimeoutMs  int        `json:"kill_timeout_ms,omitempty" yaml:"kill_timeout_ms"`
 
+	// RestartEvery ("24h") restarts the process that long after each start;
+	// RestartAt ("04:00") restarts it every day at that time of day, in the
+	// server's local time. Either, both or neither.
+	RestartEvery string `json:"restart_every,omitempty" yaml:"restart_every"`
+	RestartAt    string `json:"restart_at,omitempty" yaml:"restart_at"`
+
 	// StopSignal is sent first when stopping (default SIGTERM), then SIGKILL after
 	// KillTimeoutMs. ReloadSignal is what `procly reload` sends; empty means the
 	// process cannot be reloaded.
@@ -135,6 +141,9 @@ func (s Spec) Validate() error {
 	}
 	if s.MaxRestarts < 0 || s.RestartDelayMs < 0 || s.KillTimeoutMs < 0 || s.HealthRetries < 0 {
 		return errors.New("max_restarts, restart_delay_ms, kill_timeout_ms and health_retries must not be negative")
+	}
+	if err := s.validateSchedule(); err != nil {
+		return err
 	}
 	if err := s.validateSignals(); err != nil {
 		return err
