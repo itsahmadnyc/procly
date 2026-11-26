@@ -17,7 +17,11 @@ const alertsUsage = `usage:
   procly alerts telegram --token <bot token> --chat <chat id>
   procly alerts slack --webhook <https://hooks.slack.com/...>
   procly alerts test                              send a test message
-  procly alerts off [telegram|slack]              stop sending alerts`
+  procly alerts off [telegram|slack]              stop sending alerts
+
+  To keep the secret out of ps and your shell history, give it as "--token -" or
+  "--webhook -" (read from standard input) or set PROCLY_TELEGRAM_TOKEN or
+  PROCLY_SLACK_WEBHOOK instead of the flag.`
 
 func cmdAlerts(argv []string) error {
 	if len(argv) == 0 {
@@ -29,20 +33,27 @@ func cmdAlerts(argv []string) error {
 		if err != nil {
 			return err
 		}
-		if a.get("token") == "" || a.get("chat") == "" {
-			return errors.New("usage: procly alerts telegram --token <bot token> --chat <chat id>\n  Make a bot with @BotFather, send it a message, then find the chat id at https://api.telegram.org/bot<token>/getUpdates")
+		token, err := secret(a, "token", "PROCLY_TELEGRAM_TOKEN", os.Stdin)
+		if err != nil {
+			return err
+		}
+		if token == "" || a.get("chat") == "" {
+			return errors.New("usage: procly alerts telegram --token <bot token> --chat <chat id>\n  The token can also be given as \"--token -\" (standard input) or in PROCLY_TELEGRAM_TOKEN.\n  Make a bot with @BotFather, send it a message, then find the chat id at https://api.telegram.org/bot<token>/getUpdates")
 		}
 		return alertsSet(func(c *alerts.Config) {
-			c.Telegram = &alerts.Telegram{Token: a.get("token"), ChatID: a.get("chat")}
+			c.Telegram = &alerts.Telegram{Token: token, ChatID: a.get("chat")}
 		}, "telegram")
 	case "slack":
 		a, err := parse(argv[1:], flagSet{valued: set("webhook")})
 		if err != nil {
 			return err
 		}
-		hook := a.get("webhook")
+		hook, err := secret(a, "webhook", "PROCLY_SLACK_WEBHOOK", os.Stdin)
+		if err != nil {
+			return err
+		}
 		if u, err := url.Parse(hook); err != nil || u.Scheme != "https" || u.Host == "" {
-			return errors.New("usage: procly alerts slack --webhook <https://hooks.slack.com/services/...>")
+			return errors.New("usage: procly alerts slack --webhook <https://hooks.slack.com/services/...>\n  The URL can also be given as \"--webhook -\" (standard input) or in PROCLY_SLACK_WEBHOOK.")
 		}
 		return alertsSet(func(c *alerts.Config) { c.Slack = &alerts.Slack{WebhookURL: hook} }, "slack")
 	case "test":

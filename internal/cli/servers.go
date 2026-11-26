@@ -61,6 +61,7 @@ func cmdAgent(argv []string) error {
 
 const serverUsage = `usage:
   procly server add <name> <https://host:4748> --token <token> --fingerprint <sha256:...>
+    (give the token as "--token -" on standard input, or in PROCLY_TOKEN, to keep it out of ps)
   procly server invite <name> [--hub-address <host:4749>]
   procly server ls
   procly server rm <name>`
@@ -70,10 +71,14 @@ func cmdAgentJoin(argv []string) error {
 	if err != nil {
 		return err
 	}
-	if len(a.pos) != 1 || a.get("name") == "" || a.get("fingerprint") == "" || a.get("token") == "" {
-		return errors.New("usage: procly agent join <hub-host:4749> --name <name> --fingerprint <sha256:...> --token <token>\n  Copy it from 'procly server invite' on the hub.")
+	token, err := secret(a, "token", "PROCLY_TOKEN", os.Stdin)
+	if err != nil {
+		return err
 	}
-	cfg := agent.JoinConfig{Hub: a.pos[0], Name: a.get("name"), Fingerprint: a.get("fingerprint"), Token: a.get("token")}
+	if len(a.pos) != 1 || a.get("name") == "" || a.get("fingerprint") == "" || token == "" {
+		return errors.New("usage: procly agent join <hub-host:4749> --name <name> --fingerprint <sha256:...> --token <token>\n  Copy it from 'procly server invite' on the hub. The token can also be given as \"--token -\" (standard input) or in PROCLY_TOKEN.")
+	}
+	cfg := agent.JoinConfig{Hub: a.pos[0], Name: a.get("name"), Fingerprint: a.get("fingerprint"), Token: token}
 	if err := agent.Join(cfg); err != nil {
 		var rej *agent.ErrRejected
 		switch {
@@ -198,10 +203,14 @@ func cmdServerAdd(argv []string) error {
 	if err != nil {
 		return err
 	}
-	if len(a.pos) != 2 || a.get("token") == "" || a.get("fingerprint") == "" {
+	token, err := secret(a, "token", "PROCLY_TOKEN", os.Stdin)
+	if err != nil {
+		return err
+	}
+	if len(a.pos) != 2 || token == "" || a.get("fingerprint") == "" {
 		return errors.New(serverUsage)
 	}
-	s := remote.Server{Name: a.pos[0], URL: a.pos[1], Token: a.get("token"), Fingerprint: a.get("fingerprint")}
+	s := remote.Server{Name: a.pos[0], URL: a.pos[1], Token: token, Fingerprint: a.get("fingerprint")}
 	if err := s.Validate(); err != nil {
 		return err
 	}

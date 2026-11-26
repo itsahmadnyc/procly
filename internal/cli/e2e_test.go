@@ -65,6 +65,23 @@ func (c *cli) run(args ...string) (string, int) {
 	return string(out), code
 }
 
+// runWith is run with extra environment variables and standard input.
+func (c *cli) runWith(env []string, stdin string, args ...string) (string, int) {
+	c.t.Helper()
+	cmd := exec.Command(binary, args...)
+	cmd.Dir = c.dir
+	cmd.Env = append(append(os.Environ(), "PROCLY_HOME="+c.home, "NO_COLOR=1", "PROCLY_SERVER="), env...)
+	cmd.Stdin = strings.NewReader(stdin)
+	out, err := cmd.CombinedOutput()
+	code := 0
+	if ee, ok := err.(*exec.ExitError); ok {
+		code = ee.ExitCode()
+	} else if err != nil {
+		c.t.Fatalf("running procly %v: %v", args, err)
+	}
+	return string(out), code
+}
+
 // ok runs a command that must succeed and returns its output.
 func (c *cli) ok(args ...string) string {
 	c.t.Helper()
@@ -415,33 +432,7 @@ func TestCLIJSONFromAnotherServer(t *testing.T) {
 	far, here := newCLI(t), newCLI(t)
 	far.ok("start", "sleep 30", "--name", "far-app")
 
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	addr := ln.Addr().String()
-	ln.Close()
-	out := &syncBuffer{}
-	agent := exec.Command(binary, "agent", "--addr", addr)
-	agent.Dir = far.dir
-	agent.Env = append(os.Environ(), "PROCLY_HOME="+far.home, "NO_COLOR=1", "PROCLY_SERVER=")
-	agent.Stdout, agent.Stderr = out, out
-	if err := agent.Start(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { agent.Process.Kill(); agent.Wait() })
-	waitFor(t, "the agent to print its token", func() bool { return strings.Contains(out.String(), "--token") })
-
-	var token string
-	for _, l := range strings.Split(out.String(), "\n") {
-		if f := strings.Fields(l); len(f) == 3 && f[0] == "--token" {
-			token = f[1]
-		}
-	}
-	fp := regexp.MustCompile(`sha256:[0-9a-f]{64}`).FindString(out.String())
-	if token == "" || fp == "" {
-		t.Fatalf("no token or fingerprint in the agent's output:\n%s", out.String())
-	}
+	addr, token, fp := startAgent(t, far)
 	here.ok("server", "add", "far", "https://"+addr, "--token", token, "--fingerprint", fp)
 
 	var views []struct{ Name, Status string }
@@ -453,4 +444,123 @@ func TestCLIJSONFromAnotherServer(t *testing.T) {
 		t.Errorf("describe --json -S: %+v (%v)", one, err)
 	}
 	here.fails("describe", "nope", "--json", "-S", "far")
+}
+
+// freeAddr returns a loopback address that is free right now.
+func freeAddr(t *testing.T) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	return ln.Addr().String()
+}
+
+// startBackground runs procly with args in c's home until the test ends and
+// returns what it prints.
+func startBackground(t *testing.T, c *cli, args ...string) *syncBuffer {
+	t.Helper()
+	out := &syncBuffer{}
+	cmd := exec.Command(binary, args...)
+	cmd.Dir = c.dir
+	cmd.Env = append(os.Environ(), "PROCLY_HOME="+c.home, "NO_COLOR=1", "PROCLY_SERVER=")
+	cmd.Stdout, cmd.Stderr = out, out
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cmd.Process.Kill(); cmd.Wait() })
+	return out
+}
+
+// tokenAndFingerprint reads them from what an agent or invite printed: the
+// token on the "--token <t>" line, the fingerprint as sha256:<64 hex>.
+func tokenAndFingerprint(t *testing.T, text string) (token, fp string) {
+	t.Helper()
+	for _, l := range strings.Split(text, "\n") {
+		if f := strings.Fields(l); len(f) >= 2 && f[0] == "--token" {
+			token = f[1]
+		}
+	}
+	fp = regexp.MustCompile(`sha256:[0-9a-f]{64}`).FindString(text)
+	if token == "" || fp == "" {
+		t.Fatalf("no token or fingerprint in:\n%s", text)
+	}
+	return token, fp
+}
+
+// startAgent runs `procly agent` for c and returns its address, token and fingerprint.
+func startAgent(t *testing.T, c *cli) (addr, token, fp string) {
+	t.Helper()
+	addr = freeAddr(t)
+	out := startBackground(t, c, "agent", "--addr", addr)
+	waitFor(t, "the agent to print its token", func() bool { return strings.Contains(out.String(), "--token") })
+	token, fp = tokenAndFingerprint(t, out.String())
+	return addr, token, fp
+}
+
+func TestCLISecretsWithoutTheCommandLine(t *testing.T) {
+	// server add: token from the environment, then from standard input.
+	far := newCLI(t)
+	far.ok("start", "sleep 30", "--name", "far-app")
+	addr, token, fp := startAgent(t, far)
+
+	here := newCLI(t)
+	out, code := here.runWith([]string{"PROCLY_TOKEN=" + token}, "", "server", "add", "viaenv", "https://"+addr, "--fingerprint", fp)
+	if code != 0 || !strings.Contains(out, "added") {
+		t.Fatalf("server add with PROCLY_TOKEN: exit %d\n%s", code, out)
+	}
+	out, code = here.runWith(nil, token+"\n", "server", "add", "viastdin", "https://"+addr, "--token", "-", "--fingerprint", fp)
+	if code != 0 || !strings.Contains(out, "added") {
+		t.Fatalf("server add with --token -: exit %d\n%s", code, out)
+	}
+	contains(t, here.ok("server", "ls"), "viaenv", "viastdin")
+	// A wrong secret from the environment is rejected like a wrong flag.
+	out, code = here.runWith([]string{"PROCLY_TOKEN=wrongwrongwrongwrongwrongwrongwrong1"}, "", "server", "add", "bad", "https://"+addr, "--fingerprint", fp)
+	if code == 0 || !strings.Contains(out, "rejected the token") {
+		t.Errorf("a wrong token from the environment: exit %d\n%s", code, out)
+	}
+
+	// agent join: the same two ways, against a hub.
+	hub := newCLI(t)
+	hubAddr := freeAddr(t)
+	startBackground(t, hub, "hub", "--addr", hubAddr)
+	waitFor(t, "the hub to listen", func() bool {
+		c, err := net.DialTimeout("tcp", hubAddr, 200*time.Millisecond)
+		if err == nil {
+			c.Close()
+		}
+		return err == nil
+	})
+	for _, how := range []string{"env", "stdin"} {
+		invite := hub.ok("server", "invite", "from-"+how, "--hub-address", hubAddr)
+		tok, hfp := tokenAndFingerprint(t, invite)
+		edge := newCLI(t)
+		var env []string
+		var stdin string
+		argv := []string{"agent", "join", hubAddr, "--name", "from-" + how, "--fingerprint", hfp}
+		if how == "env" {
+			env = []string{"PROCLY_TOKEN=" + tok}
+		} else {
+			stdin = tok + "\n"
+			argv = append(argv, "--token", "-")
+		}
+		out, code := edge.runWith(env, stdin, argv...)
+		if code != 0 || !strings.Contains(out, "joined") {
+			t.Errorf("agent join via %s: exit %d\n%s", how, code, out)
+		}
+	}
+
+	// alerts: nothing given says where the secret can come from (no network is used).
+	c := newCLI(t)
+	contains(t, c.fails("alerts", "telegram", "--chat", "1"), "PROCLY_TELEGRAM_TOKEN", "--token -")
+	contains(t, c.fails("alerts", "slack"), "PROCLY_SLACK_WEBHOOK", "--webhook -")
+	out, code = c.runWith(nil, "", "alerts", "telegram", "--token", "-", "--chat", "1")
+	if code == 0 || !strings.Contains(out, "nothing on standard input") {
+		t.Errorf("--token - with an empty stdin: exit %d\n%s", code, out)
+	}
+	out, code = c.runWith(nil, "http://not-https.example\n", "alerts", "slack", "--webhook", "-")
+	if code == 0 || !strings.Contains(out, "https") {
+		t.Errorf("a webhook read from stdin is still checked: exit %d\n%s", code, out)
+	}
 }

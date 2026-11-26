@@ -225,6 +225,12 @@ procly server add prod-2 https://203.0.113.7:4748 \
 procly server ls
 ```
 
+A token given as an argument shows in `ps` while the command runs and may stay in your
+shell history. To avoid that, set `PROCLY_TOKEN` instead of `--token`, or pass
+`--token -` and pipe it in (`... | procly server add prod-2 https://... --token - --fingerprint ...`).
+The same works for `procly agent join`, and for the alerts below
+(`PROCLY_TELEGRAM_TOKEN`, `PROCLY_SLACK_WEBHOOK`, or `--token -` and `--webhook -`).
+
 The panel shows a tab per server (switch with `[` and `]`), each with its own
 processes, graphs and logs. Unreachable servers are marked instead of slowing
 the others down.
@@ -281,7 +287,9 @@ directly reachable servers.
 - The agent pins the hub's certificate by fingerprint; the hub checks the
   agent's token against the hash it stored at `invite`. Neither side trusts a CA.
 - `join` saves its settings to `~/.procly/agent-connect.json` (mode 600), so
-  the token never appears on a command line or in `procly ls`.
+  `agent connect` and `procly ls` never show the token. `join` itself takes it as
+  `--token`, which `ps` can see while it runs; use `PROCLY_TOKEN` or `--token -`
+  to keep it off the command line.
 - `procly server invite <name>` again issues a new token and drops the old
   connection; `procly server rm <name>` cuts it off within ten seconds.
 - Only the hub's port 4749 needs to be reachable; the agent opens nothing.
@@ -320,7 +328,9 @@ procly alerts off
 
 A test message goes out first; settings are saved only if it arrives. A crash
 loop sends one message per process every five minutes, with a count of the
-ones it skipped. Tokens are kept in `~/.procly/alerts.json` (mode 600). For
+ones it skipped. Tokens are kept in `~/.procly/alerts.json` (mode 600); to keep a
+token off the command line, use `PROCLY_TELEGRAM_TOKEN` or `PROCLY_SLACK_WEBHOOK`, or
+`--token -` and `--webhook -` to read it from standard input. For
 Telegram, create a bot with @BotFather, send it a message, and read your chat
 id from `https://api.telegram.org/bot<token>/getUpdates`.
 
