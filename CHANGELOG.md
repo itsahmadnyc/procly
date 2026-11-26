@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.3.0
 
 A new logo and a redesigned web panel.
 
@@ -14,6 +14,10 @@ A new logo and a redesigned web panel.
 - Each process remembers its last 40 events (starts, stops, crashes, give-ups,
   failed health checks), with the stderr lines of the run that crashed.
 - Searchable logs that can be paused, wrapped and downloaded.
+- Issue templates, and Discussions for questions.
+
+Upgrading: restart the daemon so it runs the new version, and update agents
+too, or their servers show no host stats in the panel. Nothing else changes.
 
 ## v0.2.0
 
