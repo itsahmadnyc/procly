@@ -84,8 +84,15 @@ type panel struct {
 }
 
 // newPanel serves the panel with a fake local backend and an empty PROCLY_HOME.
-func newPanel(t *testing.T) *panel {
+func newPanel(t *testing.T) *panel { return newPanelBehind(t) }
+
+// newPanelBehind is newPanel with proxies trusted to say who the visitor is.
+func newPanelBehind(t *testing.T, trusted ...string) *panel {
 	t.Helper()
+	proxies, err := ParseTrustedProxies(trusted)
+	if err != nil {
+		t.Fatal(err)
+	}
 	home := t.TempDir()
 	t.Setenv("PROCLY_HOME", home)
 	a, pw, err := loadAuth(filepath.Join(home, "web.json"), false)
@@ -96,7 +103,7 @@ func newPanel(t *testing.T) *panel {
 		{ID: 0, Name: "api", Status: proc.StatusOnline, PID: 42, EnvKeys: []string{"DB_PASSWORD"}},
 		{ID: 1, Name: "mailer", Status: proc.StatusErrored, EnvKeys: []string{}},
 	}}
-	s := &server{servers: newRegistry(fb), auth: a, host: "test-host"}
+	s := &server{servers: newRegistry(fb), auth: a, host: "test-host", proxies: proxies}
 	srv := httptest.NewServer(s.routes())
 	t.Cleanup(srv.Close)
 	jar, _ := cookiejar.New(nil)
@@ -111,6 +118,12 @@ type resp struct {
 
 func (p *panel) req(method, path, body string, csrf bool) resp {
 	p.t.Helper()
+	return p.reqFrom(method, path, body, csrf, "")
+}
+
+// reqFrom is req with an X-Forwarded-For header, as a reverse proxy sends it.
+func (p *panel) reqFrom(method, path, body string, csrf bool, forwardedFor string) resp {
+	p.t.Helper()
 	var r io.Reader
 	if body != "" {
 		r = strings.NewReader(body)
@@ -118,6 +131,9 @@ func (p *panel) req(method, path, body string, csrf bool) resp {
 	req, _ := http.NewRequest(method, p.url+path, r)
 	if csrf {
 		req.Header.Set("X-Procly", "1")
+	}
+	if forwardedFor != "" {
+		req.Header.Set("X-Forwarded-For", forwardedFor)
 	}
 	res, err := p.c.Do(req)
 	if err != nil {

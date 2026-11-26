@@ -114,6 +114,7 @@ procly web                  # http://127.0.0.1:4747
 procly web --port 8080
 procly web --addr 0.0.0.0:4747
 procly web --reset-password
+procly web --trusted-proxy 127.0.0.1   # behind a reverse proxy, see below
 ```
 
 The first start prints a random password once; only a bcrypt hash is stored
@@ -173,9 +174,21 @@ Both were run in front of the panel: login works, the session cookie gets
 `Secure` from `X-Forwarded-Proto` (nginx needs the line above; Caddy sends it by
 itself), and the live logs arrive as they are written, one line per second. The
 panel tells nginx not to buffer the log stream, so no extra setting is needed.
-One limit: the lockout looks only at the connection's address, so behind a proxy
-every visitor shares one, and five wrong passwords from anyone lock everyone out
-for ten minutes ([#21](https://github.com/itsahmadnyc/procly/issues/21)).
+Behind a proxy, tell the panel which address it may believe:
+
+```sh
+procly web --trusted-proxy 127.0.0.1
+```
+
+The login lockout (five wrong passwords, ten minutes) counts against the visitor's
+address. Without the flag that is the connection's address, which behind a proxy is the
+proxy's, so one person's typos would lock everyone out. With `--trusted-proxy`, a
+connection from that address (repeat the flag or separate by commas; ranges like
+`10.0.0.0/8` work) is trusted to say who the visitor is: the panel uses the last address in
+`X-Forwarded-For` that is not itself a trusted proxy, which is the one your proxy appended.
+Nothing is trusted by default, and the header from any other address is ignored, because
+anyone can write it. Trust only the addresses your proxy connects from; the panel warns if
+you trust every address.
 
 To keep the panel running, start it once by hand to note the password, stop it, then let procly run it:
 `procly start "procly web" --name panel`.
