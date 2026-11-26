@@ -47,6 +47,12 @@ Pin a version with `PROCLY_VERSION=0.1.0`, or pick the folder with
 `PROCLY_INSTALL_DIR`. Prefer to look first? Read [install.sh](install.sh), or
 download an archive from [Releases](https://github.com/itsahmadnyc/procly/releases).
 
+With Homebrew (macOS and Linux):
+
+```sh
+brew install itsahmadnyc/tap/procly
+```
+
 With npm (the right binary for your system comes as an optional dependency;
 Node is only used to start it):
 
