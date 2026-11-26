@@ -194,7 +194,7 @@ func (m model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "s":
 		if sel != nil {
-			if sel.Status == proc.StatusOnline || sel.Status == proc.StatusWaiting {
+			if sel.Status == proc.StatusOnline || sel.Status == proc.StatusWaiting || sel.Status == proc.StatusOrphaned {
 				return m, m.act("stop", sel.Name)
 			}
 			return m, m.act("start", sel.Name)
@@ -386,7 +386,7 @@ func (m model) headerLine() string {
 			counts[in.Status]++
 		}
 		parts := []string{fmt.Sprintf("%d %s", len(m.infos), plural(len(m.infos), "process", "processes"))}
-		for _, s := range []proc.Status{proc.StatusOnline, proc.StatusWaiting, proc.StatusStopped, proc.StatusErrored} {
+		for _, s := range []proc.Status{proc.StatusOnline, proc.StatusWaiting, proc.StatusOrphaned, proc.StatusStopped, proc.StatusErrored} {
 			if counts[s] > 0 {
 				parts = append(parts, lipgloss.NewStyle().Foreground(statusColor(s)).Render(fmt.Sprintf("%d %s", counts[s], s)))
 			}

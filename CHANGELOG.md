@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+- If the daemon dies while apps are running (a crash, `kill -9`, the out-of-memory
+  killer), the apps are no longer invisible and no longer started twice. The next
+  daemon lists them as `orphaned` with their pid; `procly resurrect` and `procly start`
+  skip an app that is still running from before; `procly stop`, `delete` and `kill`
+  end them. `ls`, `stop`, `kill`, `describe`, `monit` and the panel start a daemon
+  by themselves when survivors exist. `procly save` leaves orphans out, and
+  `restart` refuses them. The daemon keeps `running.json` for this (no environment
+  values), and checks the process fingerprint so a reused pid is never signalled.
+  See [docs/daemon-failure.md](docs/daemon-failure.md).
+- The panel and `procly monit` show orphans (yellow, an open ring) and offer Stop,
+  not Restart.
+
 ## v0.3.0
 
 A new logo and a redesigned web panel.

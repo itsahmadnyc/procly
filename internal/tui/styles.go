@@ -28,7 +28,7 @@ func statusColor(s proc.Status) lipgloss.TerminalColor {
 	switch s {
 	case proc.StatusOnline:
 		return colGreen
-	case proc.StatusWaiting:
+	case proc.StatusWaiting, proc.StatusOrphaned:
 		return colYellow
 	case proc.StatusErrored:
 		return colRed

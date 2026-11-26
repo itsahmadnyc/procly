@@ -44,6 +44,11 @@ func Run(resurrect bool) error {
 	defer os.Remove(paths.PidFile())
 
 	mgr := proc.NewManager(paths.LogDir(), logger)
+	mgr.TrackRunning(paths.RunFile())
+	// Processes a daemon that died left running: list them, never start a second copy.
+	if orphans := mgr.RecognizeOrphans(); len(orphans) > 0 {
+		logger.Printf("%d %s still running from a daemon that died", len(orphans), plural(len(orphans), "process is", "processes are"))
+	}
 	host, _ := os.Hostname()
 	mgr.OnEvent(alerts.NewNotifier(host, logger).Handle)
 	quit := make(chan struct{})
@@ -66,6 +71,7 @@ func Run(resurrect bool) error {
 		}
 		logger.Printf("shutting down")
 		mgr.StopAll()
+		mgr.FlushRunning() // nothing is left running, so this removes the file
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_ = srv.Shutdown(ctx)
@@ -184,4 +190,11 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
 }

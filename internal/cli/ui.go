@@ -37,7 +37,7 @@ func statusColor(s proc.Status) func(string) string {
 	switch s {
 	case proc.StatusOnline:
 		return green
-	case proc.StatusWaiting:
+	case proc.StatusWaiting, proc.StatusOrphaned:
 		return yellow
 	case proc.StatusErrored:
 		return red
@@ -153,13 +153,19 @@ func printList(w io.Writer, infos []proc.View, server string) {
 	if server != "" {
 		summary[0] += " on " + server
 	}
-	for _, s := range []proc.Status{proc.StatusOnline, proc.StatusWaiting, proc.StatusStopped, proc.StatusErrored} {
+	for _, s := range []proc.Status{proc.StatusOnline, proc.StatusWaiting, proc.StatusOrphaned, proc.StatusStopped, proc.StatusErrored} {
 		if counts[s] > 0 {
 			summary = append(summary, fmt.Sprintf("%d %s", counts[s], s))
 		}
 	}
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, dim("  "+strings.Join(summary, " · ")))
+	if n := counts[proc.StatusOrphaned]; n > 0 {
+		fmt.Fprintln(w)
+		fmt.Fprintf(w, "  %s %d %s left over from a daemon that died. Nothing restarts them or rotates their logs.\n",
+			yellow("!"), n, plural(n, "process is", "processes are"))
+		fmt.Fprintln(w, dim("    procly stop <name> ends one, then procly resurrect or procly start brings it back; procly kill ends everything."))
+	}
 	fmt.Fprintln(w)
 }
 
