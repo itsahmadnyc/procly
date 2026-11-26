@@ -27,7 +27,7 @@ cleanup() {
 trap cleanup EXIT
 
 now_ms() { local t=${EPOCHREALTIME/./}; echo $((t / 1000)); }
-filesize() { stat -c %s "$1" 2>/dev/null || stat -f %z "$1"; }
+filesize() { stat -L -c %s "$1" 2>/dev/null || stat -L -f %z "$1"; } # -L: follow symlinks (node often is one)
 rss_kb() { ps -o rss= -p "$1" | tr -d ' '; }
 children_rss_kb() { # sum of RSS of a process's direct children
 	local total=0 r
@@ -51,7 +51,8 @@ cd "$work"
 echo "Installing PM2 ($PM2_VERSION) into $work/pm2 ..." >&2
 npm install --silent --no-audit --no-fund --prefix "$work/pm2" "pm2@$PM2_VERSION" >/dev/null
 PM2="$work/pm2/node_modules/.bin/pm2"
-pm2_version=$("$PM2" --version 2>/dev/null | tail -1)
+# PM2_HOME must be set even for --version, or PM2 starts a daemon in ~/.pm2.
+pm2_version=$(PM2_HOME=$work/pm2-home "$PM2" --version 2>/dev/null | tail -1)
 
 declare -a p_cold p_rss p_apps p_ls m_cold m_rss m_apps m_ls
 
