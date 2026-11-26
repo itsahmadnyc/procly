@@ -73,10 +73,17 @@ func NewView(in Info) View {
 		h := in.History[i]
 		v.Events = append(v.Events, ViewEvent{Kind: h.Kind, AgoMs: time.Since(h.At).Milliseconds(), ExitCode: h.ExitCode, Detail: h.Detail})
 	}
+	seen := map[string]bool{}
 	for k := range in.Spec.Env {
 		if k != "PATH" {
-			v.EnvKeys = append(v.EnvKeys, k)
+			seen[k] = true
 		}
+	}
+	for _, k := range in.EnvFileKeys { // names from env files, never their values
+		seen[k] = true
+	}
+	for k := range seen {
+		v.EnvKeys = append(v.EnvKeys, k)
 	}
 	sort.Strings(v.EnvKeys)
 	return v

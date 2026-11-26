@@ -98,3 +98,39 @@ func TestIsConfig(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadEnvFile(t *testing.T) {
+	dir := t.TempDir()
+	p := writeFile(t, dir, "procly.yml", `
+apps:
+  - name: one
+    command: node a.js
+    env_file: .env
+  - name: two
+    command: node b.js
+    cwd: ./sub
+    env_file: [.env, /etc/shared.env, config/prod.env]
+  - name: three
+    command: node c.js
+`)
+	apps, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := []string(apps[0].EnvFile); len(got) != 1 || got[0] != filepath.Join(dir, ".env") {
+		t.Errorf("a single path resolves from the config's folder: %v", got)
+	}
+	want := []string{filepath.Join(dir, ".env"), "/etc/shared.env", filepath.Join(dir, "config/prod.env")}
+	got := []string(apps[1].EnvFile)
+	if len(got) != 3 || got[0] != want[0] || got[1] != want[1] || got[2] != want[2] {
+		t.Errorf("a list resolves from the config's folder, not from cwd: %v, want %v", got, want)
+	}
+	if len(apps[2].EnvFile) != 0 {
+		t.Errorf("no env_file, no files: %v", apps[2].EnvFile)
+	}
+
+	bad := writeFile(t, dir, "bad.yml", "apps:\n  - name: x\n    command: y\n    env_file: {a: b}\n")
+	if _, err := Load(bad); err == nil || !strings.Contains(err.Error(), "path or a list of paths") {
+		t.Errorf("a map is not a path: %v", err)
+	}
+}

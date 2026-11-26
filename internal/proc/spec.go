@@ -9,20 +9,25 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 var nameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
 
 // Spec describes how to run a process. It is what gets saved and resurrected.
 type Spec struct {
-	Name           string            `json:"name" yaml:"name"`
-	Command        string            `json:"command" yaml:"command"`
-	Cwd            string            `json:"cwd,omitempty" yaml:"cwd"`
-	Env            map[string]string `json:"env,omitempty" yaml:"env"`
-	AutoRestart    *bool             `json:"autorestart,omitempty" yaml:"autorestart"`
-	MaxRestarts    int               `json:"max_restarts,omitempty" yaml:"max_restarts"`
-	RestartDelayMs int               `json:"restart_delay_ms,omitempty" yaml:"restart_delay_ms"`
-	KillTimeoutMs  int               `json:"kill_timeout_ms,omitempty" yaml:"kill_timeout_ms"`
+	Name    string            `json:"name" yaml:"name"`
+	Command string            `json:"command" yaml:"command"`
+	Cwd     string            `json:"cwd,omitempty" yaml:"cwd"`
+	Env     map[string]string `json:"env,omitempty" yaml:"env"`
+	// EnvFile lists .env style files (absolute paths) read on every start.
+	// Later files override earlier ones and Env overrides them all.
+	EnvFile        StringList `json:"env_file,omitempty" yaml:"env_file"`
+	AutoRestart    *bool      `json:"autorestart,omitempty" yaml:"autorestart"`
+	MaxRestarts    int        `json:"max_restarts,omitempty" yaml:"max_restarts"`
+	RestartDelayMs int        `json:"restart_delay_ms,omitempty" yaml:"restart_delay_ms"`
+	KillTimeoutMs  int        `json:"kill_timeout_ms,omitempty" yaml:"kill_timeout_ms"`
 
 	// Log rotation: when a log passes LogMaxSize ("10MB" by default, "0" to
 	// turn it off) it moves to <log>.1 and LogKeep (default 3) old files are kept.
@@ -37,6 +42,30 @@ type Spec struct {
 	HealthTimeout  string `json:"health_timeout,omitempty" yaml:"health_timeout"`
 	HealthRetries  int    `json:"health_retries,omitempty" yaml:"health_retries"`
 	HealthGrace    string `json:"health_grace,omitempty" yaml:"health_grace"`
+}
+
+// StringList is a list that YAML may write as one string or as a sequence
+// ("env_file: .env" or "env_file: [.env, .env.local]").
+type StringList []string
+
+func (l *StringList) UnmarshalYAML(n *yaml.Node) error {
+	switch n.Kind {
+	case yaml.ScalarNode:
+		var one string
+		if err := n.Decode(&one); err != nil {
+			return err
+		}
+		*l = StringList{one}
+	case yaml.SequenceNode:
+		var many []string
+		if err := n.Decode(&many); err != nil {
+			return err
+		}
+		*l = many
+	default:
+		return fmt.Errorf("line %d: expected a path or a list of paths", n.Line)
+	}
+	return nil
 }
 
 func (s Spec) ShouldAutoRestart() bool { return s.AutoRestart == nil || *s.AutoRestart }
@@ -77,6 +106,11 @@ func (s Spec) Validate() error {
 	}
 	if !filepath.IsAbs(s.Cwd) {
 		return fmt.Errorf("cwd must be an absolute path, got %q", s.Cwd)
+	}
+	for _, f := range s.EnvFile {
+		if !filepath.IsAbs(f) {
+			return fmt.Errorf("env_file must be an absolute path, got %q", f)
+		}
 	}
 	if fi, err := os.Stat(s.Cwd); err != nil || !fi.IsDir() {
 		return fmt.Errorf("cwd %s is not a directory", s.Cwd)

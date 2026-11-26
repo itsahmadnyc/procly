@@ -14,6 +14,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/itsahmadnyc/procly/internal/envfile"
 )
 
 type Status string
@@ -51,27 +53,32 @@ type Info struct {
 	HealthErr string        `json:"health_error,omitempty"`
 	Spec      Spec          `json:"spec"`
 	History   []HistoryItem `json:"history,omitempty"` // oldest first
+
+	// EnvFileKeys are the variable names the env files gave at the last start
+	// (names only, never values).
+	EnvFileKeys []string `json:"env_file_keys,omitempty"`
 }
 
 // Process supervises one command. All fields are guarded by mu.
 type Process struct {
-	mu        sync.Mutex
-	id        int
-	spec      Spec
-	status    Status
-	cmd       *exec.Cmd
-	pid       int
-	startedAt time.Time
-	restarts  int // restarts over the lifetime of this entry
-	crashes   int // consecutive quick crashes; drives backoff and the give-up limit
-	exitCode  int
-	stopping  bool
-	exited    chan struct{} // closed when the current run exits
-	timer     *time.Timer   // pending auto-restart
-	outLog    string
-	errLog    string
-	errStart  int64 // size of errLog when the current run started
-	logger    *log.Logger
+	mu          sync.Mutex
+	id          int
+	spec        Spec
+	status      Status
+	cmd         *exec.Cmd
+	pid         int
+	startedAt   time.Time
+	envFileKeys []string // names read from spec.EnvFile at the last start
+	restarts    int      // restarts over the lifetime of this entry
+	crashes     int      // consecutive quick crashes; drives backoff and the give-up limit
+	exitCode    int
+	stopping    bool
+	exited      chan struct{} // closed when the current run exits
+	timer       *time.Timer   // pending auto-restart
+	outLog      string
+	errLog      string
+	errStart    int64 // size of errLog when the current run started
+	logger      *log.Logger
 
 	health      Health
 	healthFails int
@@ -126,9 +133,19 @@ func (p *Process) launchLocked() error {
 		p.errStart = fi.Size()
 	}
 
+	// The files are read on every start, so editing one and restarting applies it.
+	fileEnv, fileKeys, err := envfile.Load(p.spec.EnvFile)
+	if err != nil {
+		fmt.Fprintf(errf, "[procly] failed to start: %v\n", err)
+		p.status = StatusErrored
+		p.noteLocked(EventErrored, 0, "failed to start: "+err.Error())
+		return fmt.Errorf("start %s: %w", p.spec.Name, err)
+	}
+	p.envFileKeys = fileKeys
+
 	cmd := exec.Command("/bin/sh", "-c", shellCommand(p.spec.Command))
 	cmd.Dir = p.spec.Cwd
-	cmd.Env = buildEnv(p.spec.Env, p.id, p.spec.Name)
+	cmd.Env = buildEnv(fileEnv, p.spec.Env, p.id, p.spec.Name)
 	cmd.Stdout = out
 	cmd.Stderr = errf
 	// Own process group, so stop can signal the whole tree.
@@ -337,6 +354,8 @@ func (p *Process) infoLocked() Info {
 		HealthErr: p.healthErr,
 		Spec:      p.spec,
 		History:   append([]HistoryItem(nil), p.history...),
+
+		EnvFileKeys: append([]string(nil), p.envFileKeys...),
 	}
 	if p.cmd != nil || p.status == StatusOrphaned {
 		info.StartedAt = p.startedAt
@@ -393,8 +412,13 @@ func shellCommand(c string) string {
 	return head + " exec " + rest
 }
 
-func buildEnv(extra map[string]string, id int, name string) []string {
+// buildEnv is procly's own environment, then the env files, then the spec's
+// env. Go's exec keeps the last value of a repeated name, so later wins.
+func buildEnv(files, extra map[string]string, id int, name string) []string {
 	env := os.Environ()
+	for k, v := range files {
+		env = append(env, k+"="+v)
+	}
 	for k, v := range extra {
 		env = append(env, k+"="+v)
 	}

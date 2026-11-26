@@ -65,6 +65,7 @@ Start options
   -n, --name <name>             Process name (default: from file or command)
       --cwd <dir>               Working directory (default: current)
   -e, --env KEY=VALUE           Environment variable, repeatable
+      --env-file <path>         Read KEY=value lines from a file on every start, repeatable
       --no-autorestart          Leave the process down when it exits
       --max-restarts <n>        Give up after n quick crashes (default 15)
       --health <url>            http(s)://… or tcp://host:port; restart after 3 failed checks
@@ -208,7 +209,7 @@ func connectOrRecover() (*client.Client, bool) {
 
 func cmdStart(argv []string) error {
 	a, err := parse(argv, withServer(flagSet{
-		valued: set("name", "cwd", "env", "max-restarts", "health", "log-max-size", "log-keep"),
+		valued: set("name", "cwd", "env", "env-file", "max-restarts", "health", "log-max-size", "log-keep"),
 		bools:  set("no-autorestart"),
 		alias:  map[string]string{"n": "name", "e": "env"},
 	}))
@@ -339,6 +340,12 @@ func buildSpec(a args) (proc.Spec, error) {
 	}
 
 	spec := proc.Spec{Name: name, Command: command, Cwd: cwd}
+	for _, f := range a.values["env-file"] {
+		if !filepath.IsAbs(f) {
+			f = filepath.Join(cwd, f)
+		}
+		spec.EnvFile = append(spec.EnvFile, f)
+	}
 	for _, kv := range a.values["env"] {
 		k, v, ok := strings.Cut(kv, "=")
 		if !ok || k == "" {
@@ -575,6 +582,18 @@ func cmdDescribe(argv []string) error {
 			label = "env"
 		}
 		rows = append(rows, [2]string{label, k + "=" + in.Spec.Env[k]})
+	}
+	for i, f := range in.Spec.EnvFile {
+		label := ""
+		if i == 0 {
+			label = "env_file"
+		}
+		rows = append(rows, [2]string{label, tilde(f)})
+	}
+	if len(in.EnvFileKeys) > 0 {
+		names := append([]string(nil), in.EnvFileKeys...)
+		sort.Strings(names)
+		rows = append(rows, [2]string{"from files", strings.Join(names, ", ") + " (values not shown)"})
 	}
 
 	fmt.Printf("\n  %s  %s\n\n", bold(in.Name), statusColor(in.Status)(statusLabel(in.Status)))

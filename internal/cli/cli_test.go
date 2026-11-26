@@ -12,7 +12,7 @@ import (
 )
 
 var startFlags = flagSet{
-	valued: set("name", "cwd", "env", "max-restarts"),
+	valued: set("name", "cwd", "env", "env-file", "max-restarts"),
 	bools:  set("no-autorestart"),
 	alias:  map[string]string{"n": "name", "e": "env"},
 }
@@ -233,5 +233,18 @@ func TestBuildSpecHealthAndRotation(t *testing.T) {
 		if _, err := buildSpec(a); err == nil {
 			t.Errorf("%v accepted", bad)
 		}
+	}
+}
+
+func TestBuildSpecEnvFile(t *testing.T) {
+	dir := t.TempDir()
+	abs := filepath.Join(t.TempDir(), "shared.env")
+	s := specFor(t, dir, "server.js", "--env-file", ".env", "--env-file", abs)
+	want := []string{filepath.Join(dir, ".env"), abs}
+	if len(s.EnvFile) != 2 || s.EnvFile[0] != want[0] || s.EnvFile[1] != want[1] {
+		t.Errorf("EnvFile = %v, want %v: relative paths start from --cwd, absolute ones stay", s.EnvFile, want)
+	}
+	if err := s.Validate(); err != nil {
+		t.Errorf("a spec built from the flag must validate: %v", err)
 	}
 }

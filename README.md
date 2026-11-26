@@ -366,12 +366,21 @@ apps:
 procly start procly.yml
 ```
 
+Settings that live in a `.env` file can stay there: `env_file: .env` (or
+`procly start server.js --env-file .env`) reads `KEY=value` lines on every start, so
+editing the file and running `procly restart` applies it. Relative paths start from
+the config file's folder (from `--cwd` for the flag). The syntax is `KEY=value`,
+single or double quotes, `#` comments and an optional `export `; values are not
+expanded and cannot span lines. A missing file or a bad line stops the start with the
+file name and line number. The panel and `procly describe` show the names, never the values.
+
 | Field | Default | |
 |---|---|---|
 | `name` | required | letters, digits, `.`, `_`, `-` |
 | `command` | required | run with `/bin/sh -c` |
 | `cwd` | config file's folder | relative paths resolve from the config file |
 | `env` | | added to the environment |
+| `env_file` | | a path or a list of paths to `.env` style files, read on every start; later files override earlier ones and `env` overrides them all |
 | `autorestart` | `true` | |
 | `max_restarts` | `15` | quick crashes in a row before giving up |
 | `restart_delay_ms` | `1000` | doubles per crash, capped at 30s |
