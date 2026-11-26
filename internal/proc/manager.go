@@ -325,6 +325,11 @@ func (m *Manager) FlushRunning() {
 			}
 			p.mu.Unlock()
 		}
+		// A child that was just stopped can still have its cmd set for a moment;
+		// only write what is really alive, so a clean shutdown leaves nothing.
+		if !e.alive() {
+			continue
+		}
 		entries = append(entries, e)
 	}
 	if err := writeRunning(path, entries); err != nil {
