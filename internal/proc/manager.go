@@ -27,7 +27,10 @@ type Manager struct {
 	runMu   sync.Mutex     // serializes writes of that file
 	bg      sync.WaitGroup // background writes of that file, see WaitIdle
 
-	memOnce sync.Once // starts the max_memory sampler, see watchMemory
+	memOnce sync.Once      // starts the max_memory sampler, see watchMemory
+	memStop sync.Once      // stops it, see StopAll
+	memDone chan struct{}  // closed to stop it
+	memWG   sync.WaitGroup // the sampler, so StopAll can wait for it
 }
 
 // OnEvent registers a function to call (in its own goroutine) for crashes,
@@ -39,7 +42,7 @@ func (m *Manager) OnEvent(fn func(Event)) {
 }
 
 func NewManager(logDir string, logger *log.Logger) *Manager {
-	return &Manager{procs: map[string]*Process{}, logDir: logDir, logger: logger}
+	return &Manager{procs: map[string]*Process{}, logDir: logDir, logger: logger, memDone: make(chan struct{})}
 }
 
 // Start launches a new process, or starts an existing stopped one with a new spec.
@@ -162,6 +165,10 @@ func (m *Manager) Delete(target string) ([]Info, error) {
 }
 
 func (m *Manager) StopAll() []Info {
+	// The memory sampler goes first, and StopAll waits for it, so a restart it
+	// was in the middle of cannot bring a process back after this returns.
+	m.memStop.Do(func() { close(m.memDone) })
+	m.memWG.Wait()
 	infos, _ := m.Stop("all")
 	return infos
 }
