@@ -49,7 +49,7 @@ function fill(el, ...kids) {
   if (kids.some((k) => k.nodeType === Node.DOCUMENT_FRAGMENT_NODE)) { el.replaceChildren(...kids); return; }
   for (let i = 0; i < kids.length; i++) {
     const old = el.childNodes[i];
-    if (!old) el.append(kids[i]);
+    if (!old) el.appendChild(kids[i]); // always a Node here, never a string
     else morph(old, kids[i]);
   }
   while (el.childNodes.length > kids.length) el.lastChild.remove();
