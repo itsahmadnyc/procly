@@ -18,7 +18,7 @@ func newTestManager(t *testing.T) (*Manager, string) {
 	t.Helper()
 	dir := t.TempDir()
 	m := NewManager(dir, log.New(io.Discard, "", 0))
-	t.Cleanup(func() { m.StopAll() })
+	t.Cleanup(func() { m.StopAll(); m.WaitIdle() }) // no late write may land in the temp folder
 	return m, dir
 }
 

@@ -104,7 +104,7 @@ func (p *Process) running() bool {
 // the file that lists what is running.
 func (p *Process) pidChanged() {
 	if p.changed != nil {
-		go p.changed()
+		p.changed() // returns at once; the manager writes the file in the background
 	}
 }
 
