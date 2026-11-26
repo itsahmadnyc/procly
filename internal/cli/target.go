@@ -159,7 +159,7 @@ func remoteAction(server, action string, targets []string) error {
 	return errors.Join(errs...)
 }
 
-func remoteDescribe(server, target string) error {
+func remoteDescribe(server, target string, asJSON bool) error {
 	c, err := remoteServer(server)
 	if err != nil {
 		return err
@@ -171,6 +171,9 @@ func remoteDescribe(server, target string) error {
 	v, ok := findView(views, target)
 	if !ok {
 		return fmt.Errorf("%s: process not found: %s", server, target)
+	}
+	if asJSON {
+		return printJSON(os.Stdout, v)
 	}
 	auto := "no"
 	if v.AutoRestart {

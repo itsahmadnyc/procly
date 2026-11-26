@@ -332,8 +332,8 @@ id from `https://api.telegram.org/bot<token>/getUpdates`.
 | `procly stop <name\|id\|all>` | Stop (SIGTERM, then SIGKILL after 5s) |
 | `procly restart <name\|id\|all>` | Restart |
 | `procly delete <name\|id\|all>` | Stop and forget |
-| `procly ls` | Table of processes with CPU and memory |
-| `procly describe <name>` | Everything about one process |
+| `procly ls` | Table of processes with CPU and memory; `--json` prints the same data as one JSON array |
+| `procly describe <name>` | Everything about one process; `--json` prints one JSON object |
 | `procly logs [name]` | Print recent lines and follow |
 | `procly monit` | Live dashboard: processes, CPU/memory graphs, logs |
 | `procly web` | Web panel for the same, in the browser |
@@ -343,6 +343,15 @@ id from `https://api.telegram.org/bot<token>/getUpdates`.
 | `procly save` / `procly resurrect` | Remember the process list / bring it back |
 | `procly startup` | Start on boot (systemd on Linux, launchd on macOS) |
 | `procly kill` | Stop all processes and the daemon |
+
+For scripts, `procly ls --json` and `procly describe <name> --json` (also with
+`--server`) print the objects the web panel uses: names are stable, there are no
+colors, and a machine with no daemon prints `[]`. Environment variables appear as
+names only, never values.
+
+```sh
+procly ls --json | jq -r '.[] | select(.status != "online") | .name'
+```
 
 Files are run by extension (`.js` with node, `.py` with python3, `.sh` with bash, ...).
 Arguments for your script go after `--`: `procly start app.js -- --port 3000`.

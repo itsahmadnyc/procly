@@ -2,8 +2,10 @@
 package cli
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -34,8 +36,8 @@ Processes
   stop <name|id|all>            Stop processes
   restart <name|id|all>         Restart processes
   delete <name|id|all>          Stop and forget processes          alias: rm
-  list                          Show all processes                 alias: ls
-  describe <name|id>            Details for one process            alias: show
+  list [--json]                 Show all processes                 alias: ls
+  describe <name|id> [--json]   Details for one process            alias: show
   logs [name|id]                Print and follow logs
   monit                         Live dashboard in the terminal     alias: dash
   web                           Web panel (--addr, --port, --reset-password)
@@ -480,10 +482,11 @@ func showList(c *client.Client) error {
 }
 
 func cmdList(argv []string) error {
-	a, err := parse(argv, withServer(flagSet{}))
+	a, err := parse(argv, withServer(flagSet{bools: set("json")}))
 	if err != nil {
 		return err
 	}
+	asJSON := a.bools["json"]
 	if server := pickServer(a); server != "" {
 		c, err := remoteServer(server)
 		if err != nil {
@@ -493,27 +496,48 @@ func cmdList(argv []string) error {
 		if err != nil {
 			return err
 		}
+		if asJSON {
+			return printJSON(os.Stdout, views)
+		}
 		printList(os.Stdout, views, server)
 		return nil
 	}
 	c, ok := connectOrRecover()
 	if !ok {
+		if asJSON {
+			return printJSON(os.Stdout, []proc.View{}) // no daemon is no processes, not an error
+		}
 		fmt.Println(dim("\n  Daemon is not running. Start a process with: procly start app.js\n"))
 		return nil
+	}
+	if asJSON {
+		infos, err := c.List()
+		if err != nil {
+			return err
+		}
+		return printJSON(os.Stdout, proc.NewViews(infos))
 	}
 	return showList(c)
 }
 
+// printJSON writes v as indented JSON, with no colors or other text around it.
+func printJSON(w io.Writer, v any) error {
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(v)
+}
+
 func cmdDescribe(argv []string) error {
-	a, err := parse(argv, withServer(flagSet{}))
+	a, err := parse(argv, withServer(flagSet{bools: set("json")}))
 	if err != nil {
 		return err
 	}
 	if len(a.pos) != 1 {
-		return errors.New("usage: procly describe <name|id> [--server <name>]")
+		return errors.New("usage: procly describe <name|id> [--json] [--server <name>]")
 	}
+	asJSON := a.bools["json"]
 	if server := pickServer(a); server != "" {
-		return remoteDescribe(server, a.pos[0])
+		return remoteDescribe(server, a.pos[0], asJSON)
 	}
 	c, ok := connectOrRecover()
 	if !ok {
@@ -522,6 +546,9 @@ func cmdDescribe(argv []string) error {
 	in, err := c.Get(a.pos[0])
 	if err != nil {
 		return err
+	}
+	if asJSON {
+		return printJSON(os.Stdout, proc.NewView(in))
 	}
 	auto := "no"
 	if in.Spec.ShouldAutoRestart() {
