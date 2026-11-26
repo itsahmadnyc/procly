@@ -86,12 +86,24 @@ type hub struct {
 }
 
 func newHub(logger *log.Logger) *hub {
-	return &hub{
-		tunnels: map[string]*tunnel{},
-		logger:  logger,
-		// Pings find agents that vanished without closing the connection.
-		h2: &http2.Transport{ReadIdleTimeout: 30 * time.Second, PingTimeout: 15 * time.Second},
+	return &hub{tunnels: map[string]*tunnel{}, logger: logger, h2: newH2Transport()}
+}
+
+// newH2Transport makes the transport that speaks HTTP/2 over a connection an
+// agent opened. It goes through ConfigureTransports because current x/net runs
+// HTTP/2 on net/http's own transport: a bare &http2.Transport{} has none, and
+// NewClientConn panics on it. The net/http transport is only there to be tied
+// to; nothing ever dials with it.
+func newH2Transport() *http2.Transport {
+	t2, err := http2.ConfigureTransports(&http.Transport{})
+	if err != nil {
+		// It fails only for a transport that already has HTTP/2 set up, and a new one never does.
+		panic("procly hub: " + err.Error())
 	}
+	// Pings find agents that vanished without closing the connection.
+	t2.ReadIdleTimeout = 30 * time.Second
+	t2.PingTimeout = 15 * time.Second
+	return t2
 }
 
 type Options struct {
