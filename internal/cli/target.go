@@ -188,6 +188,9 @@ func remoteDescribe(server, target string, asJSON bool) error {
 		{"command", v.Command},
 		{"cwd", v.Cwd},
 	}
+	if v.Group != "" {
+		rows = append(rows[:2], append([][2]string{{"group", fmt.Sprintf("%s, instance %d of %d  (PROCLY_INSTANCE=%d)", v.Group, v.Index+1, v.Instances, v.Index)}}, rows[2:]...)...)
+	}
 	if v.PID > 0 {
 		rows = append(rows,
 			[2]string{"pid", fmt.Sprint(v.PID)},

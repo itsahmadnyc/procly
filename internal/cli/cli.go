@@ -78,6 +78,7 @@ Start options
       --stop-signal <sig>       Signal that stops it (default SIGTERM, then SIGKILL after the timeout)
       --reload-signal <sig>     Signal for procly reload, e.g. SIGHUP
       --max-memory <size>       Restart when the process and its children use more (e.g. 500MB)
+      --instances <n>           Start n copies, named name-1 .. name-n (PROCLY_INSTANCE is 0..n-1)
       --health <url>            http(s)://… or tcp://host:port; restart after 3 failed checks
       --log-max-size <size>     Rotate logs past this size (default 10MB, 0 = off)
       --log-keep <n>            Old log files to keep (default 3)
@@ -219,7 +220,7 @@ func connectOrRecover() (*client.Client, bool) {
 
 func cmdStart(argv []string) error {
 	a, err := parse(argv, withServer(flagSet{
-		valued: set("name", "cwd", "env", "env-file", "max-restarts", "max-memory", "stop-signal", "reload-signal", "restart-every", "restart-at", "health", "log-max-size", "log-keep"),
+		valued: set("name", "cwd", "env", "env-file", "max-restarts", "max-memory", "instances", "stop-signal", "reload-signal", "restart-every", "restart-at", "health", "log-max-size", "log-keep"),
 		bools:  set("no-autorestart"),
 		alias:  map[string]string{"n": "name", "e": "env"},
 	}))
@@ -245,22 +246,38 @@ func cmdStart(argv []string) error {
 	} else {
 		// `procly start api` brings back a stopped process by name.
 		if len(a.pos) == 1 && len(a.rest) == 0 && len(a.values) == 0 && !fileExists(a.pos[0]) {
-			if info, err := c.Get(a.pos[0]); err == nil {
-				if info.Status == proc.StatusOnline || info.Status == proc.StatusWaiting {
-					return fmt.Errorf("%s is already running, use 'procly restart %s'", info.Name, info.Name)
+			if all, err := c.List(); err == nil {
+				if members := membersOf(all, a.pos[0]); len(members) > 0 {
+					up := 0
+					for _, in := range members {
+						if in.Status == proc.StatusOnline || in.Status == proc.StatusWaiting {
+							up++
+						}
+					}
+					if up == len(members) {
+						return fmt.Errorf("%s is already running, use 'procly restart %s'", a.pos[0], a.pos[0])
+					}
+					infos, err := c.Restart(a.pos[0])
+					for _, in := range infos {
+						fmt.Printf("  %s %s\n", green("started"), bold(in.Name))
+					}
+					if err != nil {
+						return err
+					}
+					return showList(c)
 				}
-				if _, err := c.Restart(info.Name); err != nil {
-					return err
-				}
-				fmt.Printf("  %s %s\n", green("started"), bold(info.Name))
-				return showList(c)
 			}
 		}
 		spec, err := buildSpec(a)
 		if err != nil {
 			return err
 		}
-		specs = []proc.Spec{spec}
+		if specs, err = proc.Expand(spec); err != nil {
+			return err
+		}
+	}
+	if err := checkNamesFree(c, specs); err != nil {
+		return err
 	}
 
 	var errs []error
@@ -377,6 +394,13 @@ func buildSpec(a args) (proc.Spec, error) {
 		}
 		spec.MaxRestarts = n
 	}
+	if v := a.get("instances"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > proc.MaxInstances {
+			return spec, fmt.Errorf("--instances must be a number from 1 to %d", proc.MaxInstances)
+		}
+		spec.Instances = n
+	}
 	spec.MaxMemory = a.get("max-memory")
 	spec.RestartEvery = a.get("restart-every")
 	spec.RestartAt = a.get("restart-at")
@@ -488,6 +512,45 @@ func cmdAction(action string, argv []string) error {
 	return errors.Join(errs...)
 }
 
+// membersOf is the processes named name, or in the group called name.
+func membersOf(all []proc.Info, name string) []proc.Info {
+	var out []proc.Info
+	for _, in := range all {
+		if in.Name == name || in.Spec.Group == name {
+			out = append(out, in)
+		}
+	}
+	return out
+}
+
+// checkNamesFree refuses to start a group when one of its names is taken, so a
+// clash does not leave half of it running. A single process with a taken name is
+// left to the daemon, which says "already running" or starts a stopped one anew.
+func checkNamesFree(c *client.Client, specs []proc.Spec) error {
+	if len(specs) < 2 && (len(specs) == 0 || specs[0].Group == "") {
+		return nil
+	}
+	all, err := c.List()
+	if err != nil {
+		return err
+	}
+	for _, s := range specs {
+		for _, in := range all {
+			if in.Name == s.Name {
+				return fmt.Errorf("%s already exists; delete it (procly delete %s) or start the group under another name", s.Name, s.Name)
+			}
+		}
+		if s.Group != "" {
+			for _, in := range all {
+				if in.Name == s.Group {
+					return fmt.Errorf("%s is already a process; delete it first, or choose another name for the group", s.Group)
+				}
+			}
+		}
+	}
+	return nil
+}
+
 func showList(c *client.Client) error {
 	infos, err := c.List()
 	if err != nil {
@@ -574,6 +637,9 @@ func cmdDescribe(argv []string) error {
 		{"id", fmt.Sprint(in.ID)},
 		{"command", in.Spec.Command},
 		{"cwd", tilde(in.Spec.Cwd)},
+	}
+	if in.Spec.Group != "" {
+		rows = append(rows[:1], append([][2]string{{"group", fmt.Sprintf("%s, instance %d of %d  (PROCLY_INSTANCE=%d)", in.Spec.Group, in.Spec.Index+1, in.Spec.Instances, in.Spec.Index)}}, rows[1:]...)...)
 	}
 	if in.PID > 0 {
 		rows = append(rows,

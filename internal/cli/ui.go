@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -83,6 +84,124 @@ func renderTable(w io.Writer, headers []string, rows [][]string, right map[int]b
 }
 
 // printList shows processes; server is "" for this machine.
+// listRow is one line of the table: a process, or the summary of a group.
+type listRow struct {
+	in       *proc.View  // nil for a group's summary line
+	members  []proc.View // the group's instances, for its summary line
+	name     string
+	indented bool // an instance shown under its group
+	restarts int
+}
+
+// groupedForDisplay puts the instances of a group together, under a summary
+// line, where the first of them was; everything else keeps its order.
+func groupedForDisplay(infos []proc.View) []listRow {
+	byGroup := map[string][]proc.View{}
+	for _, in := range infos {
+		if in.Group != "" {
+			byGroup[in.Group] = append(byGroup[in.Group], in)
+		}
+	}
+	for _, g := range byGroup {
+		sort.SliceStable(g, func(a, b int) bool { return g[a].Index < g[b].Index })
+	}
+	var out []listRow
+	done := map[string]bool{}
+	for i := range infos {
+		in := infos[i]
+		if in.Group == "" {
+			out = append(out, listRow{in: &infos[i], name: in.Name, restarts: in.Restarts})
+			continue
+		}
+		if done[in.Group] {
+			continue
+		}
+		done[in.Group] = true
+		members := byGroup[in.Group]
+		sum := 0
+		for _, m := range members {
+			sum += m.Restarts
+		}
+		out = append(out, listRow{members: members, name: fmt.Sprintf("%s ×%d", in.Group, len(members)), restarts: sum})
+		for k := range members {
+			m := members[k]
+			out = append(out, listRow{in: &m, name: "  " + m.Name, indented: true, restarts: m.Restarts})
+		}
+	}
+	return out
+}
+
+// groupStatus summarises a group in the status column: "4 online", or
+// "3 online · 1 errored" when they differ.
+func groupStatus(members []proc.View) (string, func(string) string) {
+	counts := map[proc.Status]int{}
+	for _, m := range members {
+		counts[m.Status]++
+	}
+	var parts []string
+	for _, st := range []proc.Status{proc.StatusOnline, proc.StatusWaiting, proc.StatusOrphaned, proc.StatusErrored, proc.StatusStopped} {
+		if counts[st] > 0 {
+			parts = append(parts, fmt.Sprintf("%d %s", counts[st], st))
+		}
+	}
+	text := "● " + strings.Join(parts, " · ")
+	switch {
+	case counts[proc.StatusOnline] == len(members):
+		return text, green
+	case counts[proc.StatusOnline] == 0 && counts[proc.StatusErrored] > 0:
+		return text, red
+	case counts[proc.StatusStopped] == len(members):
+		return text, dim
+	}
+	return text, yellow
+}
+
+func (d listRow) statusColor(s string) string {
+	if d.in != nil {
+		return statusColor(d.in.Status)(s)
+	}
+	_, color := groupStatus(d.members)
+	return color(s)
+}
+
+// cells are the table columns for the row.
+func (d listRow) cells(withHealth bool) []string {
+	var row []string
+	if d.in != nil {
+		in := *d.in
+		pid, up, cpu, mem := "-", "-", "-", "-"
+		if in.PID > 0 {
+			pid = fmt.Sprint(in.PID)
+			up = fmtDuration(time.Duration(in.UptimeMs) * time.Millisecond)
+			cpu = fmt.Sprintf("%.1f%%", in.CPU)
+			mem = fmtBytes(in.Memory)
+		}
+		row = []string{fmt.Sprint(in.ID), d.name, statusLabel(in.Status), pid, up, fmt.Sprint(in.Restarts), cpu, mem}
+		if withHealth {
+			h := string(in.Health)
+			if in.HealthCheck == "" || h == "" {
+				h = "-"
+			}
+			row = append(row, h)
+		}
+		return row
+	}
+	var cpu float64
+	var mem int64
+	for _, m := range d.members {
+		if m.PID > 0 {
+			cpu += m.CPU
+			mem += m.Memory
+		}
+	}
+	status, _ := groupStatus(d.members)
+	row = []string{"", d.name, status, "-", "-", fmt.Sprint(d.restarts), fmt.Sprintf("%.1f%%", cpu), fmtBytes(mem)}
+	if withHealth {
+		row = append(row, "-")
+	}
+	return row
+}
+
 func printList(w io.Writer, infos []proc.View, server string) {
 	if len(infos) == 0 {
 		if server != "" {
@@ -102,43 +221,42 @@ func printList(w io.Writer, infos []proc.View, server string) {
 	if withHealth {
 		headers = append(headers, "health")
 	}
-	rows := make([][]string, len(infos))
 	counts := map[proc.Status]int{}
-	for i, in := range infos {
+	for _, in := range infos {
 		counts[in.Status]++
-		pid, up, cpu, mem := "-", "-", "-", "-"
-		if in.PID > 0 {
-			pid = fmt.Sprint(in.PID)
-			up = fmtDuration(time.Duration(in.UptimeMs) * time.Millisecond)
-			cpu = fmt.Sprintf("%.1f%%", in.CPU)
-			mem = fmtBytes(in.Memory)
-		}
-		rows[i] = []string{fmt.Sprint(in.ID), in.Name, statusLabel(in.Status), pid, up, fmt.Sprint(in.Restarts), cpu, mem}
-		if withHealth {
-			h := string(in.Health)
-			if in.HealthCheck == "" || h == "" {
-				h = "-"
-			}
-			rows[i] = append(rows[i], h)
-		}
+	}
+	display := groupedForDisplay(infos)
+	rows := make([][]string, len(display))
+	for i, d := range display {
+		rows[i] = d.cells(withHealth)
 	}
 	right := map[int]bool{0: true, 3: true, 5: true, 6: true, 7: true}
 	fmt.Fprintln(w)
 	renderTable(w, headers, rows, right, func(row, col int, s string) string {
+		d := display[row]
 		switch col {
 		case 1:
+			if d.in == nil { // a group: its name stands out, the instances are plain
+				return bold(s)
+			}
+			if d.indented {
+				return s
+			}
 			return bold(s)
 		case 2:
-			return statusColor(infos[row].Status)(s)
+			return d.statusColor(s)
 		case 5:
-			if infos[row].Restarts > 0 {
+			if d.restarts > 0 {
 				return yellow(s)
 			}
 			return s
 		case 0, 3:
 			return dim(s)
 		case 8:
-			switch infos[row].Health {
+			if d.in == nil {
+				return dim(s)
+			}
+			switch d.in.Health {
 			case proc.HealthHealthy:
 				return green(s)
 			case proc.HealthUnhealthy:

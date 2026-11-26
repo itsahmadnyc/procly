@@ -35,6 +35,15 @@ type Spec struct {
 	RestartEvery string `json:"restart_every,omitempty" yaml:"restart_every"`
 	RestartAt    string `json:"restart_at,omitempty" yaml:"restart_at"`
 
+	// Instances starts that many copies of the app, named name-1 .. name-N (see
+	// Expand). It is what a person writes; once expanded, each copy is its own
+	// spec with Group, Index and the total in Instances, which is what is saved.
+	Instances int `json:"instances,omitempty" yaml:"instances"`
+	// Group is the base name of a copy ("queue" for queue-1), Index its place
+	// from 0. Empty Group: not an instance.
+	Group string `json:"group,omitempty" yaml:"-"`
+	Index int    `json:"index,omitempty" yaml:"-"`
+
 	// StopSignal is sent first when stopping (default SIGTERM), then SIGKILL after
 	// KillTimeoutMs. ReloadSignal is what `procly reload` sends; empty means the
 	// process cannot be reloaded.
@@ -141,6 +150,12 @@ func (s Spec) Validate() error {
 	}
 	if s.MaxRestarts < 0 || s.RestartDelayMs < 0 || s.KillTimeoutMs < 0 || s.HealthRetries < 0 {
 		return errors.New("max_restarts, restart_delay_ms, kill_timeout_ms and health_retries must not be negative")
+	}
+	if s.Instances < 0 || s.Instances > MaxInstances {
+		return fmt.Errorf("instances must be between 1 and %d, got %d", MaxInstances, s.Instances)
+	}
+	if s.Group != "" && (s.Instances < 2 || s.Index < 0 || s.Index >= s.Instances) {
+		return fmt.Errorf("%s: an instance needs instances >= 2 and an index below it, got index %d of %d", s.Name, s.Index, s.Instances)
 	}
 	if err := s.validateSchedule(); err != nil {
 		return err

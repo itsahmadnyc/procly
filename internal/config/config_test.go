@@ -134,3 +134,53 @@ apps:
 		t.Errorf("a map is not a path: %v", err)
 	}
 }
+
+func TestLoadInstances(t *testing.T) {
+	dir := t.TempDir()
+	p := writeFile(t, dir, "procly.yml", `
+apps:
+  - name: api
+    command: node api.js
+  - name: queue
+    command: node worker.js
+    instances: 3
+    env:
+      MODE: worker
+  - name: one
+    command: sleep 1
+    instances: 1
+`)
+	apps, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, a := range apps {
+		names = append(names, a.Name)
+	}
+	if got := strings.Join(names, ","); got != "api,queue-1,queue-2,queue-3,one" {
+		t.Fatalf("names = %s", got)
+	}
+	q := apps[2]
+	if q.Group != "queue" || q.Index != 1 || q.Instances != 3 || q.Env["MODE"] != "worker" || q.Cwd != dir {
+		t.Errorf("queue-2 = %+v", q)
+	}
+	if apps[0].Group != "" || apps[4].Group != "" || apps[4].Instances != 0 {
+		t.Errorf("a plain app and instances: 1 are single processes: %+v %+v", apps[0], apps[4])
+	}
+
+	for name, body := range map[string]string{
+		"duplicate": "apps:\n  - name: queue-2\n    command: x\n  - name: queue\n    command: y\n    instances: 3\n",
+		"toomany":   "apps:\n  - name: q\n    command: x\n    instances: 500\n",
+		"negative":  "apps:\n  - name: q\n    command: x\n    instances: -2\n",
+		"clash":     "apps:\n  - name: queue\n    command: x\n    instances: 2\n  - name: queue\n    command: y\n",
+	} {
+		bad := writeFile(t, dir, name+".yml", body)
+		if _, err := Load(bad); err == nil {
+			t.Errorf("%s should be refused", name)
+		}
+	}
+	if _, err := Load(writeFile(t, dir, "dup2.yml", "apps:\n  - name: queue-2\n    command: x\n  - name: queue\n    command: y\n    instances: 3\n")); err == nil || !strings.Contains(err.Error(), "queue-2") {
+		t.Errorf("a name made twice must be named in the error: %v", err)
+	}
+}

@@ -657,3 +657,15 @@ a.list-item:hover { background: var(--hover); }
   .tl-when { grid-column: 2; padding-top: 0; text-align: left; }
   .toast { left: 16px; right: 16px; bottom: 16px; max-width: none; }
 }
+
+/* instances of one app: a row that opens, with the copies indented under it */
+.group-row td { background: color-mix(in srgb, var(--hover) 55%, transparent); }
+.group-name { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.group-name .chev { display: inline-flex; width: 16px; justify-content: center; color: var(--muted); transition: transform 0.12s ease; }
+.group-name .chev.open { transform: rotate(90deg); }
+.group-name .chev svg { width: 14px; height: 14px; }
+.table tbody tr.child-row td:first-child { padding-left: 42px; }
+.table tbody tr.child-row .cell-name b { font-weight: 500; }
+.status.waiting-static { color: var(--amber); }
+.status.waiting-static::before { background: var(--amber); }
+@media (prefers-reduced-motion: reduce) { .group-name .chev { transition: none; } }
