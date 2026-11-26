@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- `procly ls` is faster on Linux: it reads CPU and memory from `/proc` instead of starting `ps` on every call. On one server that took `ls` from about 55 ms to 18 ms with ten apps. macOS still uses `ps`.
 - If the daemon dies while apps are running (a crash, `kill -9`, the out-of-memory
   killer), the apps are no longer invisible and no longer started twice. The next
   daemon lists them as `orphaned` with their pid; `procly resurrect` and `procly start`

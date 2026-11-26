@@ -375,15 +375,15 @@ Same machine, same ten apps (a small Node HTTP server each), median of three run
 
 | | procly | PM2 |
 |---|---|---|
-| Install size | 9.9 MB, one binary, no runtime | 16.7 MB of node_modules, plus Node (127 MB) |
-| Daemon memory, 10 apps running | **11.4 MB** | 77.0 MB |
-| Memory of the 10 apps themselves | 494 MB | 658 MB |
-| Start command to first HTTP response | **200 ms** | 820 ms |
-| `ls` | **56 ms** | 348 ms |
+| Install size | 9.9 MB, one binary, no runtime | 16.7 MB of node_modules, plus Node (121 MB) |
+| Daemon memory, 10 apps running | **11.5 MB** | 76.2 MB |
+| Memory of the 10 apps themselves | 494 MB | 664 MB |
+| Start command to first HTTP response | **182 ms** | 804 ms |
+| `ls` | **18 ms** | 308 ms |
 
 Measured on a Linux x86_64 server (Ubuntu 24.04, 12 CPUs) that was also running
 other workloads, with the benchmark at the lowest priority: PM2 7.1.2 in fork
-mode, Node 24, procly built from `main` after 0.3.0. An earlier run in a Docker
+mode, Node 24, procly built from `main` after 0.3.0 (the build with `ls` reading `/proc`). An earlier run in a Docker
 container on an Apple-silicon Mac gave smaller numbers for both tools, with procly ahead
 on every row, so expect the absolute values to move with your hardware. PM2 runs
 each app inside its own Node wrapper, which is where the extra app memory comes
