@@ -4,12 +4,27 @@ A process manager for your servers. One small binary, no runtime needed.
 Runs Node, Python, Go, or any other command, restarts it when it crashes,
 keeps its logs, and brings everything back after a reboot.
 
-<picture>
-  <source media="(prefers-color-scheme: light)" srcset="docs/monit-light.png">
-  <img alt="procly monit: live process table, CPU and memory sparklines, and streaming logs" src="docs/monit-dark.png">
-</picture>
+<img alt="procly start, procly monit and the web panel in a 30 second demo" src="docs/demo.gif" width="828">
 
 > Status: early MVP. The CLI, daemon, terminal dashboard, web panel and multi-server support work.
+
+## procly vs PM2
+
+Same machine, same ten apps (a small Node HTTP server each), median of three runs:
+
+| | procly | PM2 |
+|---|---|---|
+| Install size | 9.4 MB, one binary, no runtime | 16.7 MB of node_modules, plus Node (117 MB) |
+| Daemon memory, 10 apps running | **8.2 MB** | 63.0 MB |
+| Memory of the 10 apps themselves | 465 MB | 572 MB |
+| Start command to first HTTP response | **95 ms** | 234 ms |
+| `ls` | **7 ms** | 54 ms |
+
+PM2 7.1.2 in fork mode, Node 22, procly 0.2.0, Linux arm64 with 4 CPUs (a Docker
+container in a VM, not bare metal, so absolute numbers will differ on your
+server). PM2 runs each app inside its own Node wrapper, which is where the extra
+app memory comes from. Run it yourself with [`scripts/bench.sh`](scripts/bench.sh):
+it installs PM2 into a temporary folder and leaves your setup alone.
 
 ## Install
 
@@ -116,6 +131,11 @@ Telegram, create a bot with @BotFather, send it a message, and read your chat
 id from `https://api.telegram.org/bot<token>/getUpdates`.
 
 ## Live dashboard
+
+<picture>
+  <source media="(prefers-color-scheme: light)" srcset="docs/monit-light.png">
+  <img alt="procly monit: live process table, CPU and memory sparklines, and streaming logs" src="docs/monit-dark.png">
+</picture>
 
 `procly monit` opens a full-screen view of every process with CPU and memory
 sparklines and the selected process's logs streaming underneath.
