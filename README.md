@@ -385,6 +385,14 @@ apps:
 procly start procly.yml
 ```
 
+`restart_every: 24h` and `restart_at: "04:00"` (or `--restart-every`, `--restart-at`) are for
+the nightly restart that hides a slow leak or stale connections. `restart_every` counts
+from each start, so a manual restart moves the next one; `restart_at` is a fixed time of
+day in the server's local time (the `TZ` the daemon runs with); set both and the earlier one
+wins each time. There are no cron expressions yet. A scheduled restart is recorded as a
+`scheduled` event, shows in the restarts column, and leaves the give-up counter alone; it
+is kept by `save` and `resurrect`.
+
 `procly reload <name|all>` sends the `reload_signal` to the process (not to its children:
 a master such as nginx or gunicorn passes it on) and keeps it running. It is recorded as
 a `reloaded` event, does not touch the restart counters, and fails with a clear message
@@ -419,6 +427,8 @@ file name and line number. The panel and `procly describe` show the names, never
 | `env_file` | | a path or a list of paths to `.env` style files, read on every start; later files override earlier ones and `env` overrides them all |
 | `autorestart` | `true` | |
 | `max_memory` | | restart when the process and everything it started use more than this (e.g. `500MB`); see below |
+| `restart_every` | | restart the process this long after each start, e.g. `24h` or `90m` (a unit is required, at least one minute) |
+| `restart_at` | | restart it every day at this time, e.g. `"04:00"` (24 hours, the server's local time) |
 | `stop_signal` | `SIGTERM` | what stopping sends first (`SIGINT`, `SIGQUIT`, `SIGHUP`, `SIGUSR1`, `SIGUSR2`, `SIGKILL`); `SIGKILL` follows after `kill_timeout_ms` |
 | `reload_signal` | | what `procly reload` sends, e.g. `SIGHUP`; empty means the process cannot be reloaded |
 | `max_restarts` | `15` | quick crashes in a row before giving up |
@@ -448,6 +458,7 @@ The everyday commands are the same:
 | `pm2 save` / `pm2 resurrect` | `procly save` / `procly resurrect` |
 | `pm2 startup` | `procly startup` |
 | `pm2 kill` | `procly kill` |
+| `pm2 start app.js --cron-restart "0 4 * * *"` | `restart_at: "04:00"` or `restart_every: 24h` (no cron expressions) |
 | `pm2 sendSignal SIGHUP api` | `procly reload api` with `reload_signal: SIGHUP` |
 | `pm2 start app.js --max-memory-restart 500M` | `procly start app.js --max-memory 500MB` |
 

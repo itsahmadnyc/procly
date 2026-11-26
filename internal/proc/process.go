@@ -169,6 +169,9 @@ func (p *Process) launchLocked() error {
 		p.health = HealthStarting
 		go p.healthLoop(cmd, exited, p.spec)
 	}
+	if p.spec.scheduled() {
+		go p.scheduleLoop(cmd, exited, p.spec)
+	}
 	p.ident = ""
 	p.noteLocked(HistoryStarted, 0, "pid "+strconv.Itoa(p.pid))
 	p.pidChanged()
@@ -315,7 +318,12 @@ func (p *Process) Stop() {
 }
 
 // Restart stops the process if needed and starts it again.
-func (p *Process) Restart() error {
+func (p *Process) Restart() error { return p.restart(true) }
+
+// restart stops the process and starts it again. A manual restart gives the
+// process a fresh start with the crash counter at zero; a scheduled one keeps
+// the counter, since it says nothing about whether the process is healthy.
+func (p *Process) restart(resetCrashes bool) error {
 	p.mu.Lock()
 	if p.status == StatusOrphaned {
 		name, pid := p.spec.Name, p.pid
@@ -330,7 +338,9 @@ func (p *Process) Restart() error {
 		return nil // started concurrently
 	}
 	p.restarts++
-	p.crashes = 0
+	if resetCrashes {
+		p.crashes = 0
+	}
 	return p.launchLocked()
 }
 

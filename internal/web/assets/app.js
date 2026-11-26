@@ -433,6 +433,7 @@ const EVENT = {
   unhealthy: { ic: "pulse", tone: "bad", title: () => "Health check failed" },
   memory: { ic: "alert", tone: "warn", title: () => "Restarted: used too much memory" },
   reloaded: { ic: "restart", tone: "good", title: () => "Reloaded" },
+  scheduled: { ic: "clock", tone: "", title: (e) => "Scheduled restart" },
   started: { ic: "play", tone: "good", title: () => "Started" },
   stopped: { ic: "stop", tone: "", title: () => "Stopped" },
   orphaned: { ic: "alert", tone: "warn", title: () => "Found running after its daemon died" },
@@ -1220,6 +1221,7 @@ TAB_PAGES.overview = (srv, name) => {
       add("Directory", p.cwd);
       add("Autorestart", p.autorestart ? `on, gives up after ${p.max_restarts} quick crashes` : "off");
       if (p.health_check) add("Health check", `${p.health || "not running"} · ${p.health_check}`, p.health === "healthy" ? "good" : p.health === "unhealthy" ? "bad" : "");
+      if (p.restart_every || p.restart_at) add("Scheduled restart", [p.restart_every && `every ${p.restart_every} after a start`, p.restart_at && `every day at ${p.restart_at} (server time)`].filter(Boolean).join(" and "));
       if (p.max_memory) add("Memory limit", `restarts above ${fmtBytes(p.max_memory)}, counting its children`);
       add("Environment", p.env_keys.length ? h("div", { class: "chips" }, p.env_keys.map((k) => h("span", { class: "badge", text: k }))) : h("span", { class: "muted", text: "none set" }));
       add("Logs", p.out_log || "–");
@@ -1273,6 +1275,7 @@ TAB_PAGES.config = () => {
           ["Retry delay", `${fmtDur(p.restart_delay_ms)}, doubling up to 30s`],
           ["Counter resets", "after a run longer than 30s"],
           ["Stop", `${p.stop_signal || "SIGTERM"}, then SIGKILL after ${fmtDur(p.kill_timeout_ms)}`],
+          ["Scheduled", p.restart_every || p.restart_at ? [p.restart_every && `every ${p.restart_every}`, p.restart_at && `daily at ${p.restart_at}`].filter(Boolean).join(", ") : "none"],
           ["Reload", p.reload_signal ? `${p.reload_signal} (procly reload ${p.name})` : "not set: restart is the only way"],
         ]),
         card("config", "Logs", [

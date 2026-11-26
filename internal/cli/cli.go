@@ -71,6 +71,8 @@ Start options
       --env-file <path>         Read KEY=value lines from a file on every start, repeatable
       --no-autorestart          Leave the process down when it exits
       --max-restarts <n>        Give up after n quick crashes (default 15)
+      --restart-every <dur>     Restart it this long after each start, e.g. 24h (at least 1m)
+      --restart-at <HH:MM>      Restart it every day at this time, server's local time
       --stop-signal <sig>       Signal that stops it (default SIGTERM, then SIGKILL after the timeout)
       --reload-signal <sig>     Signal for procly reload, e.g. SIGHUP
       --max-memory <size>       Restart when the process and its children use more (e.g. 500MB)
@@ -215,7 +217,7 @@ func connectOrRecover() (*client.Client, bool) {
 
 func cmdStart(argv []string) error {
 	a, err := parse(argv, withServer(flagSet{
-		valued: set("name", "cwd", "env", "env-file", "max-restarts", "max-memory", "stop-signal", "reload-signal", "health", "log-max-size", "log-keep"),
+		valued: set("name", "cwd", "env", "env-file", "max-restarts", "max-memory", "stop-signal", "reload-signal", "restart-every", "restart-at", "health", "log-max-size", "log-keep"),
 		bools:  set("no-autorestart"),
 		alias:  map[string]string{"n": "name", "e": "env"},
 	}))
@@ -374,6 +376,8 @@ func buildSpec(a args) (proc.Spec, error) {
 		spec.MaxRestarts = n
 	}
 	spec.MaxMemory = a.get("max-memory")
+	spec.RestartEvery = a.get("restart-every")
+	spec.RestartAt = a.get("restart-at")
 	spec.StopSignal = a.get("stop-signal")
 	spec.ReloadSignal = a.get("reload-signal")
 	spec.Health = a.get("health")
@@ -592,6 +596,12 @@ func cmdDescribe(argv []string) error {
 		if in.HealthErr != "" {
 			rows = append(rows, [2]string{"", "last check: " + in.HealthErr})
 		}
+	}
+	if in.Spec.RestartEvery != "" {
+		rows = append(rows, [2]string{"restart every", in.Spec.RestartEvery + "  (after each start)"})
+	}
+	if in.Spec.RestartAt != "" {
+		rows = append(rows, [2]string{"restart at", in.Spec.RestartAt + "  (every day, server's local time)"})
 	}
 	if in.Spec.StopSignal != "" {
 		rows = append(rows, [2]string{"stop signal", proc.SignalName(in.Spec.StopSignal) + ", then SIGKILL after the kill timeout"})

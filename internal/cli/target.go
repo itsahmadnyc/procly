@@ -199,6 +199,12 @@ func remoteDescribe(server, target string, asJSON bool) error {
 		rows = append(rows, [2]string{"last exit", fmt.Sprint(v.ExitCode)})
 	}
 	rows = append(rows, [2]string{"restarts", fmt.Sprint(v.Restarts)}, [2]string{"autorestart", auto})
+	if v.RestartEvery != "" {
+		rows = append(rows, [2]string{"restart every", v.RestartEvery + "  (after each start)"})
+	}
+	if v.RestartAt != "" {
+		rows = append(rows, [2]string{"restart at", v.RestartAt + "  (every day, server's local time)"})
+	}
 	if v.StopSignal != "" {
 		rows = append(rows, [2]string{"stop signal", v.StopSignal + ", then SIGKILL after the kill timeout"})
 	}
