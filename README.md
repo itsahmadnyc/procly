@@ -145,6 +145,33 @@ panel.example.com {
 }
 ```
 
+or nginx (certificates from certbot or your own):
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name panel.example.com;
+    ssl_certificate     /etc/letsencrypt/live/panel.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/panel.example.com/privkey.pem;
+
+    location / {
+        proxy_pass http://127.0.0.1:4747;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-For $remote_addr;
+    }
+}
+```
+
+Both were run in front of the panel: login works, the session cookie gets
+`Secure` from `X-Forwarded-Proto` (nginx needs the line above; Caddy sends it by
+itself), and the live logs arrive as they are written, one line per second. The
+panel tells nginx not to buffer the log stream, so no extra setting is needed.
+One limit: the lockout looks only at the connection's address, so behind a proxy
+every visitor shares one, and five wrong passwords from anyone lock everyone out
+for ten minutes ([#21](https://github.com/itsahmadnyc/procly/issues/21)).
+
 To keep the panel running, start it once by hand to note the password, stop it, then let procly run it:
 `procly start "procly web" --name panel`.
 
