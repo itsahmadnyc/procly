@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## v0.3.1
+
+Apps no longer get lost when the daemon dies, `ls` is faster on Linux, and the numbers are from a real server.
 
 - `procly ls` is faster on Linux: it reads CPU and memory from `/proc` instead of starting `ps` on every call. On one server that took `ls` from about 55 ms to 18 ms with ten apps. macOS still uses `ps`.
 - If the daemon dies while apps are running (a crash, `kill -9`, the out-of-memory
@@ -14,6 +16,20 @@
   See [docs/daemon-failure.md](docs/daemon-failure.md).
 - The panel and `procly monit` show orphans (yellow, an open ring) and offer Stop,
   not Restart.
+- Under systemd, `kill -9` on the daemon is handled by the unit: systemd stops what
+  is left, starts `daemon --resurrect` after two seconds and the saved apps come
+  back, one copy each. Tested on a real server and written up in
+  [docs/daemon-failure.md](docs/daemon-failure.md).
+- The benchmark in the README was re-measured on a Linux x86_64 server (12 CPUs):
+  daemon 11.5 MB against 76.2 MB for PM2 with ten apps, `ls` 18 ms against 308 ms.
+  `scripts/bench.sh` no longer reads the size of a symlink instead of Node, and no
+  longer leaves a PM2 daemon behind.
+- Dependency updates: Bubble Tea and other Go modules, including `x/net` and
+  `x/crypto`.
+
+Upgrading: restart the daemon so it runs the new version (`procly kill`, then start
+your apps or `procly resurrect`). Apps that an older daemon started are not tracked
+for the orphan check until they are started again by the new one.
 
 ## v0.3.0
 
