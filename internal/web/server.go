@@ -42,7 +42,10 @@ type Options struct {
 	// TrustedProxies are addresses or ranges allowed to set X-Forwarded-For;
 	// empty trusts nobody. See ParseTrustedProxies.
 	TrustedProxies []string
-	Out            io.Writer // where the startup banner goes
+	// TLSCert and TLSKey, both or neither, make the panel serve HTTPS itself. The
+	// files are read again when they change and on SIGHUP.
+	TLSCert, TLSKey string
+	Out             io.Writer // where the startup banner goes
 }
 
 type server struct {
@@ -53,6 +56,9 @@ type server struct {
 }
 
 // Run serves the panel until SIGINT/SIGTERM.
+// certWatchEvery is how often the certificate files are looked at.
+const certWatchEvery = 10 * time.Second
+
 func Run(opts Options) error {
 	if err := paths.Ensure(); err != nil {
 		return err
@@ -68,6 +74,16 @@ func Run(opts Options) error {
 	host, _ := os.Hostname()
 	s := &server{servers: newRegistry(localBackend{client.New()}), auth: a, host: host, proxies: proxies}
 
+	if (opts.TLSCert == "") != (opts.TLSKey == "") {
+		return errors.New("--tls-cert and --tls-key go together: give both or neither")
+	}
+	var certs *certReloader
+	if opts.TLSCert != "" {
+		if certs, err = newCertReloader(opts.TLSCert, opts.TLSKey); err != nil {
+			return err
+		}
+	}
+
 	ln, err := net.Listen("tcp", opts.Addr)
 	if err != nil {
 		return err
@@ -80,7 +96,11 @@ func Run(opts Options) error {
 		BaseContext:       func(net.Listener) context.Context { return ctx }, // ends log streams on shutdown
 	}
 
-	printBanner(opts.Out, ln.Addr().String(), newPassword)
+	scheme := "http"
+	if certs != nil {
+		scheme = "https"
+	}
+	printBanner(opts.Out, scheme, ln.Addr().String(), newPassword)
 	if len(proxies) > 0 {
 		out := opts.Out
 		if out == nil {
@@ -90,6 +110,36 @@ func Run(opts Options) error {
 		if proxies.broad() {
 			fmt.Fprintln(out, "  Warning: that is every address, so anyone can choose which address gets locked out.")
 		}
+	}
+
+	if certs != nil {
+		srv.TLSConfig = certs.config()
+		logf := func(format string, args ...any) {
+			out := opts.Out
+			if out == nil {
+				out = os.Stdout
+			}
+			fmt.Fprintf(out, "  "+format+"\n", args...)
+		}
+		go certs.watch(ctx, certWatchEvery, logf)
+		// SIGHUP loads the certificate again at once, e.g. from a renewal hook
+		// (procly reload panel, with reload_signal: SIGHUP).
+		hup := make(chan os.Signal, 1)
+		signal.Notify(hup, syscall.SIGHUP)
+		go func() {
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-hup:
+					if err := certs.reload(); err != nil {
+						logf("%v; still serving the previous certificate", err)
+					} else {
+						logf("tls: loaded the certificate again (SIGHUP)")
+					}
+				}
+			}
+		}()
 	}
 
 	sigs := make(chan os.Signal, 1)
@@ -102,17 +152,21 @@ func Run(opts Options) error {
 		_ = srv.Shutdown(sctx)
 	}()
 
-	if err := srv.Serve(ln); !errors.Is(err, http.ErrServerClosed) {
+	serve := srv.Serve
+	if certs != nil {
+		serve = func(l net.Listener) error { return srv.ServeTLS(l, "", "") }
+	}
+	if err := serve(ln); !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
 	return nil
 }
 
-func printBanner(w io.Writer, addr, newPassword string) {
+func printBanner(w io.Writer, scheme, addr, newPassword string) {
 	if w == nil {
 		w = os.Stdout
 	}
-	fmt.Fprintf(w, "\n  procly web panel  http://%s\n", addr)
+	fmt.Fprintf(w, "\n  procly web panel  %s://%s\n", scheme, addr)
 	if newPassword != "" {
 		fmt.Fprintf(w, "\n  password  %s\n", newPassword)
 		fmt.Fprintln(w, "  Shown once. Save it now; only a hash is kept on disk.")
@@ -121,9 +175,9 @@ func printBanner(w io.Writer, addr, newPassword string) {
 		fmt.Fprintln(w, "  Forgot it? Run: procly web --reset-password")
 	}
 	if h, _, err := net.SplitHostPort(addr); err == nil {
-		if ip := net.ParseIP(h); ip == nil || !ip.IsLoopback() {
+		if ip := net.ParseIP(h); (ip == nil || !ip.IsLoopback()) && scheme == "http" {
 			fmt.Fprintln(w, "\n  Warning: listening beyond localhost over plain HTTP.")
-			fmt.Fprintln(w, "  Put it behind HTTPS (Caddy, nginx) or reach it with: ssh -L 4747:localhost:4747 <server>")
+			fmt.Fprintln(w, "  Serve HTTPS with --tls-cert and --tls-key, put it behind a proxy (Caddy, nginx), or reach it with: ssh -L 4747:localhost:4747 <server>")
 		}
 	}
 	fmt.Fprintln(w)

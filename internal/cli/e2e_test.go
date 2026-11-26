@@ -2,8 +2,16 @@ package cli
 
 import (
 	"bytes"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
+	"math/big"
 	"net"
 	"net/http"
 	"os"
@@ -464,6 +472,13 @@ func freeAddr(t *testing.T) string {
 // returns what it prints.
 func startBackground(t *testing.T, c *cli, args ...string) *syncBuffer {
 	t.Helper()
+	out, _ := startBackgroundCmd(t, c, args...)
+	return out
+}
+
+// startBackgroundCmd is startBackground that also returns the process, to send it signals.
+func startBackgroundCmd(t *testing.T, c *cli, args ...string) (*syncBuffer, *exec.Cmd) {
+	t.Helper()
 	out := &syncBuffer{}
 	cmd := exec.Command(binary, args...)
 	cmd.Dir = c.dir
@@ -473,7 +488,7 @@ func startBackground(t *testing.T, c *cli, args ...string) *syncBuffer {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { cmd.Process.Kill(); cmd.Wait() })
-	return out
+	return out, cmd
 }
 
 // tokenAndFingerprint reads them from what an agent or invite printed: the
@@ -730,4 +745,103 @@ func TestCLIWebTrustedProxy(t *testing.T) {
 	c3 := newCLI(t)
 	out3 := startBackground(t, c3, "web", "--addr", freeAddr(t), "--trusted-proxy", "0.0.0.0/0")
 	waitFor(t, "the warning", func() bool { return strings.Contains(out3.String(), "that is every address") })
+}
+
+// testCert writes a self-signed certificate for 127.0.0.1 with the given serial
+// number to dir and returns the files and the certificate pool that trusts it.
+func testCert(t *testing.T, dir string, serial int64) (certFile, keyFile string, pool *x509.CertPool) {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(serial), Subject: pkix.Name{CommonName: "procly e2e"},
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(24 * time.Hour),
+		KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		IPAddresses: []net.IP{net.ParseIP("127.0.0.1")}, IsCA: true, BasicConstraintsValid: true,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyDER, _ := x509.MarshalECPrivateKey(key)
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+	certFile, keyFile = filepath.Join(dir, "cert.pem"), filepath.Join(dir, "key.pem")
+	if err := os.WriteFile(certFile, certPEM, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(keyFile, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	pool = x509.NewCertPool()
+	pool.AppendCertsFromPEM(certPEM)
+	return certFile, keyFile, pool
+}
+
+func servedSerial(addr string) (int64, error) {
+	conn, err := tls.Dial("tcp", addr, &tls.Config{InsecureSkipVerify: true})
+	if err != nil {
+		return 0, err
+	}
+	defer conn.Close()
+	return conn.ConnectionState().PeerCertificates[0].SerialNumber.Int64(), nil
+}
+
+func TestCLIWebTLS(t *testing.T) {
+	c := newCLI(t)
+	certFile, keyFile, pool := testCert(t, c.dir, 1)
+	addr := freeAddr(t)
+	out, cmd := startBackgroundCmd(t, c, "web", "--addr", addr, "--tls-cert", certFile, "--tls-key", keyFile)
+	pw := panelPassword(t, out)
+	contains(t, out.String(), "https://"+addr)
+
+	client := &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool}}}
+	res, err := client.Get("https://" + addr + "/")
+	if err != nil || res.StatusCode != http.StatusOK {
+		t.Fatalf("GET over TLS: %v %v", res, err)
+	}
+	res.Body.Close()
+	if r, err := (&http.Client{Timeout: 5 * time.Second}).Get("http://" + addr + "/"); err == nil && r.StatusCode == http.StatusOK {
+		t.Error("plain HTTP must not be served on a TLS port")
+	}
+
+	body, _ := json.Marshal(map[string]string{"password": pw})
+	req, _ := http.NewRequest(http.MethodPost, "https://"+addr+"/api/login", bytes.NewReader(body))
+	req.Header.Set("X-Procly", "1")
+	res, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	secure := false
+	for _, ck := range res.Cookies() {
+		secure = secure || ck.Secure
+	}
+	if res.StatusCode != http.StatusOK || !secure {
+		t.Errorf("login over TLS: %d, Secure cookie: %v", res.StatusCode, secure)
+	}
+
+	// A renewed certificate is used after SIGHUP, without restarting the panel.
+	if got, _ := servedSerial(addr); got != 1 {
+		t.Fatalf("serial = %d", got)
+	}
+	testCert(t, c.dir, 2)
+	if err := cmd.Process.Signal(syscall.SIGHUP); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the new certificate after SIGHUP", func() bool { got, _ := servedSerial(addr); return got == 2 })
+	contains(t, out.String(), "loaded the certificate again (SIGHUP)")
+
+	// A broken certificate is refused; the good one stays.
+	os.WriteFile(certFile, []byte("broken"), 0o600)
+	cmd.Process.Signal(syscall.SIGHUP)
+	waitFor(t, "the refusal", func() bool { return strings.Contains(out.String(), "still serving the previous certificate") })
+	if got, _ := servedSerial(addr); got != 2 {
+		t.Errorf("the last good certificate must stay: %d", got)
+	}
+
+	// Mistakes stop the start with a message.
+	contains(t, c.fails("web", "--port", "1", "--tls-cert", certFile), "--tls-cert and --tls-key go together")
+	contains(t, c.fails("web", "--port", "1", "--tls-cert", filepath.Join(c.dir, "no.pem"), "--tls-key", keyFile), "no.pem")
 }
