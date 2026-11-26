@@ -276,6 +276,18 @@ var interpreters = map[string]string{
 	".php": "php", ".sh": "bash", ".pl": "perl",
 }
 
+// runHints name the command for file types procly does not run by itself.
+var runHints = map[string]string{".go": "go run", ".jar": "java -jar", ".rs": "cargo run --manifest-path"}
+
+// errCannotRun says what to type instead, using the file's own name.
+func errCannotRun(file, ext string) error {
+	cmd, ok := runHints[ext]
+	if !ok {
+		cmd = "<command>"
+	}
+	return fmt.Errorf("don't know how to run %s (no interpreter for %q, and it is not executable); pass the command instead, e.g. procly start \"%s %s\", or make it executable with chmod +x", file, ext, cmd, file)
+}
+
 var runnerTools = set("npm", "pnpm", "yarn", "bun", "deno", "npx")
 
 func buildSpec(a args) (proc.Spec, error) {
@@ -306,7 +318,7 @@ func buildSpec(a args) (proc.Spec, error) {
 			}
 			command = shellQuote(first)
 		default:
-			return proc.Spec{}, fmt.Errorf("don't know how to run %s, pass the full command instead, e.g. procly start \"python3 %s\"", first, first)
+			return proc.Spec{}, errCannotRun(first, ext)
 		}
 	} else {
 		command = strings.Join(a.pos, " ")

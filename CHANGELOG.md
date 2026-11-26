@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- `procly start` error for a file it cannot run now names the file and a command to pass (`go run`, `java -jar`, or `<command>`), and says `chmod +x` makes it runnable directly. `.mjs`, `.cjs` and executable files already ran; they now have tests.
+
 ## v0.3.1
 
 Apps no longer get lost when the daemon dies, `ls` is faster on Linux, and the numbers are from a real server.
