@@ -4,6 +4,7 @@ apps:
     cwd: ./api
     env:
       PORT: 3000
+    env_file: .env          # KEY=value lines, read on every start
     health: http://127.0.0.1:3000/health
     log_max_size: 50MB
   - name: worker

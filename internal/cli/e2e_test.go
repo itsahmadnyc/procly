@@ -285,3 +285,50 @@ func TestCLIAlertsCommand(t *testing.T) {
 	contains(t, c.ok("alerts"), "No alerts set up")
 	contains(t, c.ok("alerts", "off"), "turned off all alerts")
 }
+
+func TestCLIEnvFile(t *testing.T) {
+	c := newCLI(t)
+	c.file(".env", "# settings\nGREETING=hello from the file\nexport SECRET_TOKEN=\"s3cr3t value\"\nSHARED=file\n")
+	c.file("show.sh", "echo \"$GREETING|$SECRET_TOKEN|$SHARED\" > seen.txt\nsleep 30\n")
+	c.ok("start", "show.sh", "--name", "show", "--env-file", ".env", "-e", "SHARED=flag")
+
+	seen := filepath.Join(c.dir, "seen.txt")
+	waitFor(t, "seen.txt", func() bool { b, err := os.ReadFile(seen); return err == nil && strings.Contains(string(b), "|") })
+	if b, _ := os.ReadFile(seen); strings.TrimSpace(string(b)) != "hello from the file|s3cr3t value|flag" {
+		t.Fatalf("the process saw %q: file values, with -e winning over the file", b)
+	}
+
+	// describe shows the file and the names, never the values.
+	out := c.ok("describe", "show")
+	contains(t, out, "env_file", ".env", "GREETING", "SECRET_TOKEN", "values not shown")
+	if strings.Contains(out, "s3cr3t value") || strings.Contains(out, "hello from the file") {
+		t.Errorf("describe must not print the file's values:\n%s", out)
+	}
+
+	// Edit the file and restart: the change applies.
+	c.file(".env", "GREETING=changed\n")
+	os.Remove(seen)
+	c.ok("restart", "show")
+	waitFor(t, "seen.txt again", func() bool { b, err := os.ReadFile(seen); return err == nil && strings.Contains(string(b), "|") })
+	if b, _ := os.ReadFile(seen); strings.TrimSpace(string(b)) != "changed||flag" {
+		t.Errorf("after editing the file and restarting the process saw %q", b)
+	}
+
+	// Problems are reported at start, with the file and the line.
+	c.file("bad.env", "OK=1\nnot valid\n")
+	contains(t, c.fails("start", "show.sh", "--name", "broken", "--env-file", "bad.env"), "bad.env:2:")
+	contains(t, c.fails("start", "show.sh", "--name", "gone", "--env-file", "nope.env"), "env_file", "nope.env")
+}
+
+func TestCLIEnvFileInConfig(t *testing.T) {
+	c := newCLI(t)
+	if err := os.MkdirAll(filepath.Join(c.dir, "conf"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	c.file("conf/app.env", "WHO=config\n")
+	c.file("conf/run.sh", "echo \"$WHO\" > ../who.txt\nsleep 30\n")
+	c.file("conf/procly.yml", "apps:\n  - name: viaconfig\n    command: sh run.sh\n    cwd: .\n    env_file: app.env\n")
+	c.ok("start", "conf/procly.yml")
+	who := filepath.Join(c.dir, "who.txt")
+	waitFor(t, "who.txt", func() bool { b, err := os.ReadFile(who); return err == nil && strings.Contains(string(b), "config") })
+}

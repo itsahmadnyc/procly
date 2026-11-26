@@ -25,8 +25,8 @@ func IsConfig(path string) bool {
 	return false
 }
 
-// Load reads the apps from a config file. Relative cwd values resolve
-// against the config file's directory.
+// Load reads the apps from a config file. Relative cwd and env_file values
+// resolve against the config file's directory.
 func Load(path string) ([]proc.Spec, error) {
 	abs, err := filepath.Abs(path)
 	if err != nil {
@@ -55,6 +55,11 @@ func Load(path string) ([]proc.Spec, error) {
 			return nil, fmt.Errorf("%s: duplicate app name %q", filepath.Base(path), a.Name)
 		}
 		seen[a.Name] = true
+		for j, f := range a.EnvFile {
+			if !filepath.IsAbs(f) {
+				a.EnvFile[j] = filepath.Join(dir, f)
+			}
+		}
 		switch {
 		case a.Cwd == "":
 			a.Cwd = dir
