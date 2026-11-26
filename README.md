@@ -441,8 +441,12 @@ Processes start with the default SIGHUP, as from a normal shell.
 `max_memory: 500MB` (or `--max-memory 500MB`) restarts a process that leaks. It is
 measured every five seconds and counts the process together with the processes it
 started (its process group), so `npm run start` is judged by the node under it. A restart
-records a `memory` event, which the panel's Events tab shows and alerts send, and it
-does not count toward `max_restarts`: it is not a crash. For Node you can also set
+records a `memory` event, which the panel's Events tab shows and alerts send. A leak found
+after the process has been up for 30 seconds or more is not a crash: it does not count
+toward `max_restarts`. A process that goes over the limit within 30 seconds of starting is
+a limit set too low, not a leak, so it counts like a quick crash and procly gives up after
+`max_restarts` of them instead of restarting it every few seconds for ever (the panel and
+the alert say to raise `max_memory`). For Node you can also set
 `NODE_OPTIONS=--max-old-space-size=450` in `env`, so V8 collects harder before it grows
 past the limit.
 

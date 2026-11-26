@@ -1166,7 +1166,7 @@ PAGES.process = () => {
       const last = (p.events || []).find(isProblem);
       if (p.status === "errored") {
         calloutBox.append(callout("bad", "alert", last && last.detail && last.detail.startsWith("gave up") ? `procly gave up on ${p.name}` : `${p.name} exited with an error`,
-          last && last.detail && last.detail.startsWith("gave up") ? `It crashed ${p.max_restarts} times in a row without staying up for 30 seconds. Fix the cause, then start it again.` : `Exit code ${p.exit_code}. Autorestart is ${p.autorestart ? "on" : "off"}.`,
+          last && last.detail && last.detail.startsWith("gave up") ? (last.detail.includes("too much memory") ? `It went over its memory limit of ${fmtBytes(p.max_memory)} right after starting, ${p.max_restarts} times in a row. Raise max_memory, or fix what makes it need that much, then start it again.` : `It crashed ${p.max_restarts} times in a row without staying up for 30 seconds. Fix the cause, then start it again.`) : `Exit code ${p.exit_code}. Autorestart is ${p.autorestart ? "on" : "off"}.`,
           last && last.detail));
       } else if (p.status === "waiting") {
         calloutBox.append(callout("warn", "restart", `${p.name} crashed and is restarting`, "procly waits a little longer after each quick crash, up to 30 seconds.", last && last.detail));

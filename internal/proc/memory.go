@@ -63,22 +63,51 @@ func (m *Manager) checkMemory() {
 }
 
 // restartForMemory restarts the run that has process id pid, if it is still
-// the current one. It is not a crash: it does not count toward max_restarts
-// (Restart resets the crash counter), but it does show in the restarts column.
+// the current one.
+//
+// After a run of any length it is not a crash: it does not count toward
+// max_restarts (Restart resets the crash counter), but it shows in the restarts
+// column. A run that goes over the limit within stableAfter of starting is a
+// different thing: that is a limit set too low, or an app that needs more than
+// it is allowed, not a leak, and restarting it every few seconds for ever helps
+// nobody. Those count like quick crashes, and procly gives up after the same
+// number of them.
 func (p *Process) restartForMemory(pid int, used, limit int64) {
 	p.mu.Lock()
 	if p.cmd == nil || p.pid != pid || p.stopping {
 		p.mu.Unlock()
 		return
 	}
-	ev := Event{Kind: EventMemory, Process: p.spec.Name, Restarts: p.restarts + 1,
-		Detail: fmt.Sprintf("used %s, the limit is %s", fmtMB(used), fmtMB(limit))}
-	p.noteLocked(EventMemory, 0, ev.Detail)
+	detail := fmt.Sprintf("used %s, the limit is %s", fmtMB(used), fmtMB(limit))
+	ev := Event{Kind: EventMemory, Process: p.spec.Name, Restarts: p.restarts + 1, Detail: detail}
+	p.noteLocked(EventMemory, 0, detail)
+	quick := time.Since(p.startedAt) < stableAfter
+	if quick {
+		p.crashes++
+	}
+	giveUp := quick && p.crashes > p.spec.MaxRestartsOrDefault()
+	name, quickRestarts := p.spec.Name, p.crashes-1
 	p.mu.Unlock()
-	p.logger.Printf("%s: %s, restarting", p.spec.Name, ev.Detail)
+
+	if giveUp {
+		p.logger.Printf("%s: %s within %s of starting, %d times in a row, giving up", name, detail, stableAfter, quickRestarts)
+		p.Stop()
+		p.mu.Lock()
+		p.status = StatusErrored
+		why := fmt.Sprintf("gave up after %d restarts for using too much memory right after starting (%s). Raise max_memory, or fix what makes it need that much.", quickRestarts, detail)
+		p.noteLocked(EventErrored, 0, why)
+		p.mu.Unlock()
+		p.emit(Event{Kind: EventErrored, Process: name, Restarts: p.restarts, Detail: why})
+		return
+	}
+	p.logger.Printf("%s: %s, restarting", name, detail)
 	p.emit(ev)
 	// Not in a goroutine of its own: the sampler waits for it, and StopAll waits for the sampler.
-	_ = p.Restart()
+	if quick {
+		_ = p.restart(false) // keep the count that leads to giving up
+	} else {
+		_ = p.Restart()
+	}
 }
 
 func fmtMB(n int64) string {
