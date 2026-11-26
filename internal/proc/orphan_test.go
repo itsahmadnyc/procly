@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -225,16 +226,13 @@ func TestStopAllReachesOrphans(t *testing.T) {
 }
 
 func TestAnOrphanThatExitsDisappears(t *testing.T) {
-	a, file, pids := startPair(t)
+	_, file, pids := startPair(t)
 	b, _ := newTestManager(t)
 	b.TrackRunning(file)
 	b.RecognizeOrphans()
 
 	// Kill it from outside, the way a crash or an admin would.
-	a.mu.Lock()
-	cmd := a.procs["api"].cmd
-	a.mu.Unlock()
-	cmd.Process.Kill()
+	syscall.Kill(pids["api"], syscall.SIGKILL)
 	eventually(t, "api to be gone", func() bool { return gone(pids["api"]) })
 
 	names := ""

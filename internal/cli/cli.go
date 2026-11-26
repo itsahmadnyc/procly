@@ -616,6 +616,14 @@ func cmdKill() error {
 	if err != nil {
 		return err
 	}
+	// The daemon answers before it has finished shutting down; wait for it, so
+	// the next command does not find it half gone.
+	for i := 0; i < 200; i++ {
+		if _, err := c.Ping(); err != nil {
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
 	fmt.Printf("  %s %d %s and the daemon\n", green("stopped"), len(infos), plural(len(infos), "process", "processes"))
 	return nil
 }
