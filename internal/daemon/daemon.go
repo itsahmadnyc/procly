@@ -71,6 +71,7 @@ func Run(resurrect bool) error {
 		}
 		logger.Printf("shutting down")
 		mgr.StopAll()
+		mgr.WaitIdle()     // a late background write must not undo the next line
 		mgr.FlushRunning() // nothing is left running, so this removes the file
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
