@@ -189,6 +189,23 @@ func connect() (*client.Client, bool) {
 	return c, err == nil
 }
 
+// connectOrRecover is connect, with one addition: when no daemon is running but
+// processes a dead daemon started still are, it starts a daemon, so they can be
+// listed and stopped instead of staying invisible.
+func connectOrRecover() (*client.Client, bool) {
+	if c, ok := connect(); ok {
+		return c, true
+	}
+	if n := len(proc.LiveOrphans(paths.RunFile())); n > 0 {
+		fmt.Fprintln(os.Stderr, dim(fmt.Sprintf("  %d %s still running from a daemon that died; starting a daemon to manage them",
+			n, plural(n, "process is", "processes are"))))
+		if c, err := ensureDaemon(); err == nil {
+			return c, true
+		}
+	}
+	return client.New(), false
+}
+
 func cmdStart(argv []string) error {
 	a, err := parse(argv, withServer(flagSet{
 		valued: set("name", "cwd", "env", "max-restarts", "health", "log-max-size", "log-keep"),
@@ -402,7 +419,7 @@ func cmdAction(action string, argv []string) error {
 	if server := pickServer(a); server != "" {
 		return remoteAction(server, action, a.pos)
 	}
-	c, ok := connect()
+	c, ok := connectOrRecover()
 	if !ok {
 		return errors.New("daemon is not running, nothing to " + action)
 	}
@@ -460,7 +477,7 @@ func cmdList(argv []string) error {
 		printList(os.Stdout, views, server)
 		return nil
 	}
-	c, ok := connect()
+	c, ok := connectOrRecover()
 	if !ok {
 		fmt.Println(dim("\n  Daemon is not running. Start a process with: procly start app.js\n"))
 		return nil
@@ -479,7 +496,7 @@ func cmdDescribe(argv []string) error {
 	if server := pickServer(a); server != "" {
 		return remoteDescribe(server, a.pos[0])
 	}
-	c, ok := connect()
+	c, ok := connectOrRecover()
 	if !ok {
 		return errors.New("daemon is not running")
 	}
@@ -590,7 +607,7 @@ func cmdResurrect() error {
 }
 
 func cmdKill() error {
-	c, ok := connect()
+	c, ok := connectOrRecover()
 	if !ok {
 		fmt.Println(dim("  daemon is not running"))
 		return nil
@@ -608,7 +625,7 @@ func cmdMonit() error {
 	if err != nil || fi.Mode()&os.ModeCharDevice == 0 {
 		return errors.New("monit needs an interactive terminal, use 'procly ls' in scripts")
 	}
-	c, ok := connect()
+	c, ok := connectOrRecover()
 	if !ok {
 		return errors.New("daemon is not running, start a process first: procly start app.js")
 	}

@@ -22,6 +22,9 @@ type Manager struct {
 	logDir string
 	logger *log.Logger
 	events func(Event)
+
+	runFile string     // where the list of running processes is kept; "" = not kept
+	runMu   sync.Mutex // serializes writes of that file
 }
 
 // OnEvent registers a function to call (in its own goroutine) for crashes,
@@ -45,6 +48,7 @@ func (m *Manager) Start(spec Spec) (Info, error) {
 	p, exists := m.procs[spec.Name]
 	if !exists {
 		p = newProcess(m.nextID, spec, m.logDir, m.logger, m.events)
+		p.changed = m.noteChanged
 		m.nextID++
 		m.procs[spec.Name] = p
 	}
@@ -52,6 +56,9 @@ func (m *Manager) Start(spec Spec) (Info, error) {
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if exists && p.status == StatusOrphaned {
+		return p.infoLocked(), orphanError(spec.Name, p.pid)
+	}
 	if exists && p.running() {
 		return p.infoLocked(), fmt.Errorf("%s is already running (use restart)", spec.Name)
 	}
@@ -72,6 +79,7 @@ func (m *Manager) Get(target string) (Info, error) {
 }
 
 func (m *Manager) List() []Info {
+	m.pruneOrphans()
 	m.mu.Lock()
 	ps := m.sortedLocked()
 	m.mu.Unlock()
@@ -89,6 +97,7 @@ func (m *Manager) Stop(target string) ([]Info, error) {
 		return nil, err
 	}
 	each(ps, func(p *Process) error { p.Stop(); return nil })
+	m.forgetStoppedOrphans(ps)
 	return infosOf(ps), nil
 }
 
@@ -125,10 +134,15 @@ func (m *Manager) StopAll() []Info {
 
 // Save writes every process spec to path so it can be resurrected later.
 func (m *Manager) Save(path string) (int, error) {
-	infos := m.List()
-	specs := make([]Spec, len(infos))
-	for i, in := range infos {
-		specs[i] = in.Spec
+	var specs []Spec
+	for _, in := range m.List() {
+		if in.Status == StatusOrphaned {
+			continue // its spec is a sketch without the environment; saving it would lose that
+		}
+		specs = append(specs, in.Spec)
+	}
+	if specs == nil {
+		specs = []Spec{}
 	}
 	data, err := json.MarshalIndent(specs, "", "  ")
 	if err != nil {
@@ -158,9 +172,12 @@ func (m *Manager) Resurrect(path string) ([]Info, error) {
 	var errs []error
 	for _, s := range specs {
 		m.mu.Lock()
-		_, exists := m.procs[s.Name]
+		p, exists := m.procs[s.Name]
 		m.mu.Unlock()
 		if exists {
+			if p.isOrphan() {
+				m.logger.Printf("%s: not started, it is still running from before the daemon died; stop it first", s.Name)
+			}
 			continue
 		}
 		info, err := m.Start(s)
@@ -175,6 +192,7 @@ func (m *Manager) Resurrect(path string) ([]Info, error) {
 
 // resolve accepts a name, a numeric id, or "all".
 func (m *Manager) resolve(target string) ([]*Process, error) {
+	m.pruneOrphans()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if target == "all" {
@@ -223,4 +241,133 @@ func infosOf(ps []*Process) []Info {
 		infos[i] = p.Info()
 	}
 	return infos
+}
+
+// TrackRunning makes the manager keep, in path, a list of the processes it has
+// started and that are still running. A later daemon reads it to find out which
+// of them outlived this one. Call it before starting anything.
+func (m *Manager) TrackRunning(path string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.runFile = path
+}
+
+// RecognizeOrphans looks at the list a previous daemon left and takes in every
+// process that is still running as an orphan: listed, refused a second copy,
+// stoppable, but not supervised. Call it once at startup, before resurrecting.
+func (m *Manager) RecognizeOrphans() []Info {
+	m.mu.Lock()
+	path := m.runFile
+	m.mu.Unlock()
+	if path == "" {
+		return nil
+	}
+	var found []*Process
+	for _, e := range LiveOrphans(path) {
+		m.mu.Lock()
+		if _, exists := m.procs[e.Name]; exists {
+			m.mu.Unlock()
+			continue
+		}
+		p := newOrphan(m.nextID, e, m.logger)
+		p.changed = m.noteChanged
+		m.nextID++
+		m.procs[e.Name] = p
+		m.mu.Unlock()
+
+		p.mu.Lock()
+		p.noteLocked(HistoryOrphaned, 0, "still running as pid "+strconv.Itoa(e.PID)+" after the daemon that started it died")
+		p.mu.Unlock()
+		m.logger.Printf("%s: still running as pid %d, left over from a daemon that died; listed as orphaned, not started again", e.Name, e.PID)
+		found = append(found, p)
+	}
+	m.FlushRunning() // drops the entries that did not survive
+	return infosOf(found)
+}
+
+func (m *Manager) noteChanged() { m.FlushRunning() }
+
+// FlushRunning writes the list of running processes now. The manager does it
+// by itself whenever a process starts or ends; the daemon calls it once more
+// as it shuts down.
+func (m *Manager) FlushRunning() {
+	m.mu.Lock()
+	path := m.runFile
+	ps := m.sortedLocked()
+	m.mu.Unlock()
+	if path == "" {
+		return
+	}
+	m.runMu.Lock()
+	defer m.runMu.Unlock()
+	var entries []RunningEntry
+	for _, p := range ps {
+		p.mu.Lock()
+		e := RunningEntry{
+			Name: p.spec.Name, PID: p.pid, Ident: p.ident, Command: p.spec.Command, Cwd: p.spec.Cwd,
+			OutLog: p.outLog, ErrLog: p.errLog, KillTimeoutMs: p.spec.KillTimeoutMs, StartedAt: p.startedAt,
+		}
+		running := p.pid > 0 && (p.cmd != nil || p.status == StatusOrphaned)
+		p.mu.Unlock()
+		if !running {
+			continue
+		}
+		if e.Ident == "" {
+			// A child we have not reaped keeps its pid, so the pid is still ours here.
+			id, ok := identity(e.PID)
+			if !ok {
+				continue
+			}
+			e.Ident = id
+			p.mu.Lock()
+			if p.pid == e.PID && p.ident == "" {
+				p.ident = id
+			}
+			p.mu.Unlock()
+		}
+		entries = append(entries, e)
+	}
+	if err := writeRunning(path, entries); err != nil {
+		m.logger.Printf("writing %s: %v", filepath.Base(path), err)
+	}
+}
+
+// pruneOrphans forgets orphans that have exited on their own since we last looked.
+func (m *Manager) pruneOrphans() {
+	m.mu.Lock()
+	var orphans []*Process
+	for _, p := range m.procs {
+		orphans = append(orphans, p)
+	}
+	m.mu.Unlock()
+	for _, p := range orphans {
+		if !p.isOrphan() || p.orphanAlive() {
+			continue
+		}
+		m.mu.Lock()
+		if m.procs[p.spec.Name] == p {
+			delete(m.procs, p.spec.Name)
+		}
+		m.mu.Unlock()
+		m.logger.Printf("%s: the orphan has exited", p.spec.Name)
+	}
+}
+
+// forgetStoppedOrphans drops orphans that were just stopped. A normal process
+// stays listed as stopped so it can be started again, but an orphan's spec has
+// no environment, so it must not be started from it.
+func (m *Manager) forgetStoppedOrphans(ps []*Process) {
+	for _, p := range ps {
+		p.mu.Lock()
+		was, name := p.wasOrphan, p.spec.Name
+		p.mu.Unlock()
+		if !was {
+			continue
+		}
+		m.mu.Lock()
+		if m.procs[name] == p {
+			delete(m.procs, name)
+		}
+		m.mu.Unlock()
+	}
 }

@@ -268,8 +268,11 @@ function fmtDur(ms) {
 
 const clock = (d) => d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many || one + "s"}`;
-const running = (p) => p.status === "online" || p.status === "waiting";
-const needsAttention = (p) => p.status === "errored" || p.status === "waiting" || p.health === "unhealthy";
+// An orphan is running, but a daemon that has died started it: nothing watches
+// it. It can be stopped, not restarted.
+const running = (p) => p.status === "online" || p.status === "waiting" || p.status === "orphaned";
+const needsAttention = (p) => p.status === "errored" || p.status === "waiting" || p.status === "orphaned" || p.health === "unhealthy";
+const canRestart = (p) => p.status !== "orphaned";
 
 const progressive = { restart: "restarting", start: "starting", stop: "stopping", delete: "deleting" };
 const past = { restart: "Restarted", start: "Started", stop: "Stopped", delete: "Deleted" };
@@ -290,7 +293,7 @@ function healthEl(p) {
 }
 
 function countStatus(list) {
-  const c = { online: 0, waiting: 0, errored: 0, stopped: 0 };
+  const c = { online: 0, waiting: 0, orphaned: 0, errored: 0, stopped: 0 };
   for (const p of list) c[p.status] = (c[p.status] || 0) + 1;
   return c;
 }
@@ -298,7 +301,7 @@ function countStatus(list) {
 function healthBar(c) {
   const bar = h("div", { class: "health-bar", "aria-hidden": "true" });
   let total = 0;
-  for (const s of ["online", "waiting", "errored", "stopped"]) {
+  for (const s of ["online", "waiting", "orphaned", "errored", "stopped"]) {
     if (!c[s]) continue;
     total += c[s];
     const seg = h("span", { class: s });
@@ -311,7 +314,7 @@ function healthBar(c) {
 
 function countsEl(c) {
   const box = h("div", { class: "counts" });
-  for (const s of ["online", "waiting", "errored", "stopped"]) {
+  for (const s of ["online", "waiting", "orphaned", "errored", "stopped"]) {
     if (c[s]) box.append(h("span", { class: s }, h("b", { text: c[s] }), " " + s));
   }
   if (!box.childElementCount) box.append(h("span", { text: "no processes" }));
@@ -430,6 +433,7 @@ const EVENT = {
   unhealthy: { ic: "pulse", tone: "bad", title: () => "Health check failed" },
   started: { ic: "play", tone: "good", title: () => "Started" },
   stopped: { ic: "stop", tone: "", title: () => "Stopped" },
+  orphaned: { ic: "alert", tone: "warn", title: () => "Found running after its daemon died" },
   exited: { ic: "check", tone: "", title: () => "Exited cleanly" },
 };
 const eventInfo = (e) => EVENT[e.kind] || { ic: "info", tone: "", title: () => e.kind };
@@ -522,7 +526,14 @@ $("confirm-cancel").addEventListener("click", () => $("confirm").close("cancel")
 async function act(server, name, verb) {
   const k = key(server, name);
   if (S.busy.has(k)) return;
-  if (CONFIRM[verb] && !(await confirmDialog(CONFIRM[verb](name)))) return;
+  if (CONFIRM[verb]) {
+    const spec = CONFIRM[verb](name);
+    const p = fresh(server, name);
+    if (verb === "stop" && p && p.status === "orphaned") {
+      spec.text = `It is left over from a daemon that died. Stopping ends it and procly forgets it; start it again afterwards (procly resurrect brings back the saved list).`;
+    }
+    if (!(await confirmDialog(spec))) return;
+  }
   S.busy.set(k, verb);
   refresh();
   try {
@@ -796,7 +807,7 @@ function renderChrome() {
 function serverDot(info) {
   if (!info) return "";
   if (!info.ok) return " down";
-  const bad = (info.by_status.errored || 0) + (info.by_status.waiting || 0);
+  const bad = (info.by_status.errored || 0) + (info.by_status.waiting || 0) + (info.by_status.orphaned || 0);
   return bad ? " warn" : info.total ? "" : " idle";
 }
 
@@ -899,9 +910,9 @@ PAGES.overview = () => {
       } else {
         const list = h("div", { class: "list" });
         for (const { s, p } of bad) {
-          const why = p.status === "errored" ? "gave up after " + plural(p.restarts, "restart") : p.status === "waiting" ? "crashed, restarting" : "health check failing";
+          const why = p.status === "errored" ? "gave up after " + plural(p.restarts, "restart") : p.status === "waiting" ? "crashed, restarting" : p.status === "orphaned" ? "left over from a daemon that died" : "health check failing";
           list.append(h("a", { class: "list-item", href: `#/s/${encodeURIComponent(s)}/p/${encodeURIComponent(p.name)}` },
-            h("span", { class: "ev-icon " + (p.status === "waiting" ? "warn" : "bad") }, icon(p.status === "waiting" ? "restart" : "alert")),
+            h("span", { class: "ev-icon " + (p.status === "waiting" || p.status === "orphaned" ? "warn" : "bad") }, icon(p.status === "waiting" ? "restart" : "alert")),
             h("div", { class: "grow" }, h("div", { class: "title" }, h("b", { text: p.name })), h("div", { class: "sub", text: `${serverLabel(s)} · ${why}` })),
             statusEl(s, p)));
         }
@@ -1048,7 +1059,7 @@ function procRow(server, p) {
     h("td", { class: "num r hide-sm" + (up ? "" : " dim"), text: up ? fmtUptime(p.uptime_ms) : "–" }),
     h("td", { class: "num r hide-sm" + (p.restarts ? " warn" : " dim"), text: p.restarts }),
     h("td", {}, h("div", { class: "cell-actions" },
-      h("button", { class: "icon-btn hide-sm", type: "button", title: "Restart", "aria-label": `Restart ${p.name}`, disabled: busy, onclick: (e) => { e.stopPropagation(); act(server, p.name, "restart"); } }, icon("restart")),
+      h("button", { class: "icon-btn hide-sm", type: "button", title: canRestart(p) ? "Restart" : "Not supervised: stop it first", "aria-label": `Restart ${p.name}`, disabled: busy || !canRestart(p), onclick: (e) => { e.stopPropagation(); act(server, p.name, "restart"); } }, icon("restart")),
       h("button", { class: "icon-btn hide-sm", type: "button", title: running(p) ? "Stop" : "Start", "aria-label": `${running(p) ? "Stop" : "Start"} ${p.name}`, disabled: busy, onclick: (e) => { e.stopPropagation(); toggle(server, p.name); } }, icon(running(p) ? "stop" : "play")),
       h("button", { class: "icon-btn", type: "button", title: "More", "aria-label": `More actions for ${p.name}`, "aria-haspopup": "menu", onclick: (e) => { e.stopPropagation(); const q = fresh(server, p.name); if (q) popMenu(e.currentTarget, procMenu(server, q)); } }, icon("more")))));
   return tr;
@@ -1058,7 +1069,7 @@ function procMenu(server, p) {
   const base = `#/s/${encodeURIComponent(server)}/p/${encodeURIComponent(p.name)}`;
   const busy = S.busy.has(key(server, p.name));
   return [
-    { label: "Restart", icon: "restart", disabled: busy, onclick: () => act(server, p.name, "restart") },
+    { label: "Restart", icon: "restart", disabled: busy || !canRestart(p), onclick: () => act(server, p.name, "restart") },
     { label: running(p) ? "Stop" : "Start", icon: running(p) ? "stop" : "play", disabled: busy, onclick: () => act(server, p.name, toggleVerb(p)) },
     "sep",
     { label: "Logs", icon: "terminal", onclick: () => go(base + "/logs") },
@@ -1119,7 +1130,7 @@ PAGES.process = () => {
     keys(e) {
       const p = proc();
       if (!p) return false;
-      const map = { r: () => act(srv(), p.name, "restart"), s: () => toggle(srv(), p.name), o: () => go(base()), l: () => go(base() + "/logs"), e: () => go(base() + "/events"), c: () => go(base() + "/config") };
+      const map = { r: () => { if (canRestart(p)) act(srv(), p.name, "restart"); }, s: () => toggle(srv(), p.name), o: () => go(base()), l: () => go(base() + "/logs"), e: () => go(base() + "/events"), c: () => go(base() + "/config") };
       if (map[e.key]) { map[e.key](); return true; }
       return tabPage && tabPage.keys ? tabPage.keys(e) : false;
     },
@@ -1142,7 +1153,7 @@ PAGES.process = () => {
       fill(refs.sub, `id ${p.id}`, p.pid ? ` · pid ${p.pid}` : ` · last exit ${p.exit_code}`, ` · on ${serverLabel(srv())}`);
       refs.sub.classList.add("mono");
       fill(refs.actions, 
-        h("button", { class: "btn", disabled: busy, onclick: () => act(srv(), name(), "restart") }, icon("restart"), "Restart", h("kbd", { text: "r" })),
+        h("button", { class: "btn", disabled: busy || !canRestart(p), title: canRestart(p) ? null : "Not supervised: stop it first", onclick: () => act(srv(), name(), "restart") }, icon("restart"), "Restart", h("kbd", { text: "r" })),
         h("button", { class: "btn", disabled: busy, onclick: () => toggle(srv(), name()) }, icon(running(p) ? "stop" : "play"), running(p) ? "Stop" : "Start", h("kbd", { text: "s" })),
         h("button", { class: "btn ghost danger", disabled: busy, onclick: () => act(srv(), name(), "delete") }, icon("trash"), "Delete"));
 
@@ -1154,6 +1165,9 @@ PAGES.process = () => {
           last && last.detail));
       } else if (p.status === "waiting") {
         calloutBox.append(callout("warn", "restart", `${p.name} crashed and is restarting`, "procly waits a little longer after each quick crash, up to 30 seconds.", last && last.detail));
+      } else if (p.status === "orphaned") {
+        calloutBox.append(callout("warn", "alert", `${p.name} is left over from a daemon that died`,
+          `It is still running as pid ${p.pid}, but nothing supervises it: it is not restarted if it crashes, and its logs are not rotated. Stop it, then start it again; procly resurrect brings back the saved list.`));
       } else if (p.health === "unhealthy") {
         calloutBox.append(callout("bad", "pulse", "Health check failing", `procly restarts ${p.name} after ${p.health_retries} failed checks in a row.`, p.health_error));
       }

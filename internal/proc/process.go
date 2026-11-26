@@ -23,6 +23,9 @@ const (
 	StatusWaiting Status = "waiting" // crashed, restart scheduled
 	StatusStopped Status = "stopped"
 	StatusErrored Status = "errored"
+	// StatusOrphaned: running, but started by a daemon that has died. Nothing
+	// supervises it. See orphan.go.
+	StatusOrphaned Status = "orphaned"
 )
 
 const (
@@ -75,6 +78,10 @@ type Process struct {
 	healthErr   string
 	events      func(Event) // may be nil
 	history     []HistoryItem
+
+	ident     string // identity of the running pid; see identity.go
+	wasOrphan bool   // an orphan that has been stopped; the manager forgets it
+	changed   func() // called, in its own goroutine, when the running pid changes
 }
 
 func newProcess(id int, spec Spec, logDir string, logger *log.Logger, events func(Event)) *Process {
@@ -89,7 +96,17 @@ func newProcess(id int, spec Spec, logDir string, logger *log.Logger, events fun
 	}
 }
 
-func (p *Process) running() bool { return p.cmd != nil || p.status == StatusWaiting }
+func (p *Process) running() bool {
+	return p.cmd != nil || p.status == StatusWaiting || p.status == StatusOrphaned
+}
+
+// pidChanged tells the manager a process started or ended, so it can rewrite
+// the file that lists what is running.
+func (p *Process) pidChanged() {
+	if p.changed != nil {
+		go p.changed()
+	}
+}
 
 // launchLocked starts the command. Caller holds p.mu.
 func (p *Process) launchLocked() error {
@@ -135,7 +152,9 @@ func (p *Process) launchLocked() error {
 		p.health = HealthStarting
 		go p.healthLoop(cmd, exited, p.spec)
 	}
+	p.ident = ""
 	p.noteLocked(HistoryStarted, 0, "pid "+strconv.Itoa(p.pid))
+	p.pidChanged()
 	p.logger.Printf("%s: started pid=%d", p.spec.Name, p.pid)
 	go p.wait(cmd, exited)
 	return nil
@@ -153,6 +172,8 @@ func (p *Process) wait(cmd *exec.Cmd, exited chan struct{}) {
 	}
 	ranFor := time.Since(p.startedAt)
 	p.cmd, p.pid, p.exited, p.exitCode = nil, 0, nil, code
+	p.ident = ""
+	p.pidChanged()
 	p.health, p.healthFails = "", 0
 
 	if p.stopping {
@@ -248,6 +269,10 @@ func (p *Process) autoRestart() {
 // Stop sends SIGTERM to the process group, then SIGKILL after the kill timeout.
 // It returns once the process has exited.
 func (p *Process) Stop() {
+	if p.isOrphan() {
+		p.stopOrphan()
+		return
+	}
 	p.mu.Lock()
 	if p.timer != nil {
 		p.timer.Stop()
@@ -274,6 +299,13 @@ func (p *Process) Stop() {
 
 // Restart stops the process if needed and starts it again.
 func (p *Process) Restart() error {
+	p.mu.Lock()
+	if p.status == StatusOrphaned {
+		name, pid := p.spec.Name, p.pid
+		p.mu.Unlock()
+		return orphanError(name, pid)
+	}
+	p.mu.Unlock()
 	p.Stop()
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -306,7 +338,7 @@ func (p *Process) infoLocked() Info {
 		Spec:      p.spec,
 		History:   append([]HistoryItem(nil), p.history...),
 	}
-	if p.cmd != nil {
+	if p.cmd != nil || p.status == StatusOrphaned {
 		info.StartedAt = p.startedAt
 	}
 	return info

@@ -41,6 +41,10 @@ func PidFile() string   { return filepath.Join(Home(), "daemon.pid") }
 func DaemonLog() string { return filepath.Join(Home(), "daemon.log") }
 func DumpFile() string  { return filepath.Join(Home(), "dump.json") }
 
+// RunFile lists the processes the daemon has running, so a later daemon can
+// tell which of them outlived it.
+func RunFile() string { return filepath.Join(Home(), "running.json") }
+
 // Ensure creates the state directories with owner-only permissions.
 func Ensure() error {
 	return os.MkdirAll(LogDir(), 0o700)

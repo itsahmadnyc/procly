@@ -15,6 +15,9 @@ const (
 	HistoryStarted = "started"
 	HistoryStopped = "stopped"
 	HistoryExited  = "exited" // finished on its own with autorestart off
+	// HistoryOrphaned: a new daemon found the process still running after the
+	// daemon that started it died.
+	HistoryOrphaned = "orphaned"
 )
 
 // historyKeep bounds memory per process. A crash loop adds two items per

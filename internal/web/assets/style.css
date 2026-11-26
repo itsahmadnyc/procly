@@ -168,6 +168,8 @@ input::placeholder, textarea::placeholder { color: var(--faint); }
 .status.errored, .status.down { color: var(--red); }
 .status.errored::before, .status.down::before { width: 7px; height: 7px; border-radius: 1px; background: currentColor; transform: rotate(45deg); }
 .status.stopped::before { border: 1.5px solid var(--faint); }
+.status.orphaned { color: var(--amber); }
+.status.orphaned::before { width: 9px; height: 9px; border: 2px dashed currentColor; background: transparent; } /* a ring that is not closed: running, but unsupervised */
 
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--green-mark); flex-shrink: 0; }
 .dot.warn { background: var(--amber); }
@@ -342,6 +344,7 @@ tr:hover .mini path { stroke: var(--chart); }
 .health-bar .online { background: var(--green-mark); }
 .health-bar .waiting { background: var(--amber); }
 .health-bar .errored { background: var(--red); }
+.health-bar .orphaned { background: repeating-linear-gradient(135deg, var(--amber) 0 3px, transparent 3px 5px); }
 .health-bar .stopped { background: var(--border-strong); }
 .health-bar .none { flex: 1; background: var(--raised); }
 .counts { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
