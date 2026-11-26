@@ -29,6 +29,7 @@ cat <<FORMULA
 class Procly < Formula
   desc "Process manager with a web panel, health checks and alerts"
   homepage "https://github.com/$repo"
+  version "$version" # older Homebrew reads "64" from linux_arm64 in the URL; newer audits call this redundant
   license "MIT"
 
   on_macos do
