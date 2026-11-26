@@ -1,0 +1,16 @@
+# Keeps Go dependencies and the actions used by CI up to date. Security fixes
+# arrive on their own; this adds the regular weekly updates.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      go-minor-and-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
