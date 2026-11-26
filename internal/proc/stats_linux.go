@@ -80,3 +80,52 @@ func parseProcStat(stat, statm string, uptime float64, pageSize int64) (procStat
 	}
 	return procStat{cpu: cpu, rss: pages * pageSize}, true
 }
+
+// groupMemory returns, for each process group id in groups, the resident
+// memory in bytes of every process in that group (each child runs in its
+// parent's group, and the group id is the first process's pid).
+func groupMemory(groups []int) map[int]int64 {
+	want := map[int]bool{}
+	for _, g := range groups {
+		want[g] = true
+	}
+	out := map[int]int64{}
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return out
+	}
+	page := int64(os.Getpagesize())
+	for _, e := range entries {
+		pid, err := strconv.Atoi(e.Name())
+		if err != nil {
+			continue
+		}
+		st, err := os.ReadFile("/proc/" + e.Name() + "/stat")
+		if err != nil {
+			continue
+		}
+		s := string(st)
+		i := strings.LastIndexByte(s, ')')
+		if i < 0 {
+			continue
+		}
+		f := strings.Fields(s[i+1:])
+		if len(f) < 3 { // f[0] state, f[1] ppid, f[2] process group
+			continue
+		}
+		pgrp, err := strconv.Atoi(f[2])
+		if err != nil || !want[pgrp] {
+			continue
+		}
+		sm, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/statm")
+		if err != nil {
+			continue
+		}
+		if m := strings.Fields(string(sm)); len(m) >= 2 {
+			if pages, err := strconv.ParseInt(m[1], 10, 64); err == nil {
+				out[pgrp] += pages * page
+			}
+		}
+	}
+	return out
+}

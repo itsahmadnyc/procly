@@ -30,7 +30,8 @@ type View struct {
 	MaxRestarts    int    `json:"max_restarts"`
 	RestartDelayMs int64  `json:"restart_delay_ms"`
 	KillTimeoutMs  int64  `json:"kill_timeout_ms"`
-	LogMaxBytes    int64  `json:"log_max_bytes"` // 0: never rotated
+	MaxMemory      int64  `json:"max_memory,omitempty"` // bytes, 0: no limit
+	LogMaxBytes    int64  `json:"log_max_bytes"`        // 0: never rotated
 	LogKeep        int    `json:"log_keep"`
 	OutLog         string `json:"out_log"`
 	ErrLog         string `json:"err_log"`
@@ -62,6 +63,7 @@ func NewView(in Info) View {
 	v.MaxRestarts = in.Spec.MaxRestartsOrDefault()
 	v.RestartDelayMs = in.Spec.restartDelay().Milliseconds()
 	v.KillTimeoutMs = in.Spec.killTimeout().Milliseconds()
+	v.MaxMemory, _ = in.Spec.maxMemoryBytes()
 	v.LogMaxBytes, v.LogKeep = in.Spec.logLimits()
 	v.OutLog, v.ErrLog = in.OutLog, in.ErrLog
 	if in.Spec.Health != "" {

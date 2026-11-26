@@ -133,6 +133,7 @@ func redact(err error) error {
 var throttle = map[string]time.Duration{
 	proc.EventCrashed:   5 * time.Minute,
 	proc.EventUnhealthy: 5 * time.Minute,
+	proc.EventMemory:    5 * time.Minute,
 	proc.EventErrored:   0,
 }
 
@@ -191,6 +192,8 @@ func Format(host string, e proc.Event, skipped int) string {
 		fmt.Fprintf(&b, "%s stopped on %s (exit %d) and procly gave up restarting it. Check it with: procly logs %s", e.Process, host, e.ExitCode, e.Process)
 	case proc.EventUnhealthy:
 		fmt.Fprintf(&b, "%s failed its health check on %s and was restarted.", e.Process, host)
+	case proc.EventMemory:
+		fmt.Fprintf(&b, "%s used too much memory on %s and was restarted (%s).", e.Process, host, e.Detail)
 	default:
 		fmt.Fprintf(&b, "%s: %s on %s", e.Process, e.Kind, host)
 	}

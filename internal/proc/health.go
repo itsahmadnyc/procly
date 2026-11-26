@@ -21,7 +21,7 @@ const (
 
 // Event is something worth telling a person about, such as a crash.
 type Event struct {
-	Kind     string        `json:"kind"` // crashed, errored, unhealthy
+	Kind     string        `json:"kind"` // crashed, errored, unhealthy, memory
 	Process  string        `json:"process"`
 	ExitCode int           `json:"exit_code,omitempty"`
 	Restarts int           `json:"restarts"`
@@ -33,6 +33,7 @@ const (
 	EventCrashed   = "crashed"
 	EventErrored   = "errored"
 	EventUnhealthy = "unhealthy"
+	EventMemory    = "memory" // restarted because it used more than max_memory
 )
 
 func validHealthTarget(target string) error {

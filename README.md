@@ -385,6 +385,14 @@ apps:
 procly start procly.yml
 ```
 
+`max_memory: 500MB` (or `--max-memory 500MB`) restarts a process that leaks. It is
+measured every five seconds and counts the process together with the processes it
+started (its process group), so `npm run start` is judged by the node under it. A restart
+records a `memory` event, which the panel's Events tab shows and alerts send, and it
+does not count toward `max_restarts`: it is not a crash. For Node you can also set
+`NODE_OPTIONS=--max-old-space-size=450` in `env`, so V8 collects harder before it grows
+past the limit.
+
 Settings that live in a `.env` file can stay there: `env_file: .env` (or
 `procly start server.js --env-file .env`) reads `KEY=value` lines on every start, so
 editing the file and running `procly restart` applies it. Relative paths start from
@@ -401,6 +409,7 @@ file name and line number. The panel and `procly describe` show the names, never
 | `env` | | added to the environment |
 | `env_file` | | a path or a list of paths to `.env` style files, read on every start; later files override earlier ones and `env` overrides them all |
 | `autorestart` | `true` | |
+| `max_memory` | | restart when the process and everything it started use more than this (e.g. `500MB`); see below |
 | `max_restarts` | `15` | quick crashes in a row before giving up |
 | `restart_delay_ms` | `1000` | doubles per crash, capped at 30s |
 | `kill_timeout_ms` | `5000` | time between SIGTERM and SIGKILL |
@@ -428,10 +437,10 @@ The everyday commands are the same:
 | `pm2 save` / `pm2 resurrect` | `procly save` / `procly resurrect` |
 | `pm2 startup` | `procly startup` |
 | `pm2 kill` | `procly kill` |
+| `pm2 start app.js --max-memory-restart 500M` | `procly start app.js --max-memory 500MB` |
 
 What procly does **not** do (yet): cluster mode and zero-downtime `reload`,
-restart-on-file-change (`--watch`), restart at a memory limit, `pm2 deploy`, and
-Windows. If you rely on those, PM2 is still the better fit. In exchange you get
+restart-on-file-change (`--watch`), `pm2 deploy`, and Windows. If you rely on those, PM2 is still the better fit. In exchange you get
 the web panel, several servers in one place, and health checks and alerts built
 in.
 
@@ -498,7 +507,8 @@ CLI tests build and run the actual binary.
 - [x] Web panel, embedded in the binary
 - [x] Connect several servers to one panel
 - [x] Log rotation, health checks, Telegram/Slack alerts, start processes from the panel
-- [ ] Deploy from git, cluster mode, restart at a memory limit
+- [x] Restart at a memory limit
+- [ ] Deploy from git, cluster mode
 
 ## License
 

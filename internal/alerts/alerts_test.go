@@ -166,6 +166,8 @@ func TestFormat(t *testing.T) {
 			[]string{"api stopped on prod-1", "gave up", "procly logs api"}},
 		{proc.Event{Kind: proc.EventUnhealthy, Process: "web", Detail: "3 failed checks"},
 			[]string{"web failed its health check on prod-1", "restarted", "3 failed checks"}},
+		{proc.Event{Kind: proc.EventMemory, Process: "web", Detail: "used 612 MB, the limit is 500 MB"},
+			[]string{"web used too much memory on prod-1", "was restarted", "used 612 MB, the limit is 500 MB"}},
 	}
 	for _, c := range cases {
 		got := Format("prod-1", c.e, 0)

@@ -35,3 +35,27 @@ func readStats(pids []int) map[int]procStat {
 	}
 	return stats
 }
+
+// groupMemory returns, for each process group id in groups, the resident
+// memory in bytes of every process in that group.
+func groupMemory(groups []int) map[int]int64 {
+	want := map[int]bool{}
+	for _, g := range groups {
+		want[g] = true
+	}
+	out := map[int]int64{}
+	data, _ := exec.Command("ps", "-axo", "pgid=,rss=").Output()
+	sc := bufio.NewScanner(bytes.NewReader(data))
+	for sc.Scan() {
+		f := strings.Fields(sc.Text())
+		if len(f) != 2 {
+			continue
+		}
+		pgid, err1 := strconv.Atoi(f[0])
+		rss, err2 := strconv.ParseInt(f[1], 10, 64)
+		if err1 == nil && err2 == nil && want[pgid] {
+			out[pgid] += rss * 1024
+		}
+	}
+	return out
+}
