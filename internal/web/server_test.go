@@ -258,6 +258,31 @@ func TestCookieIsSecureBehindHTTPSProxy(t *testing.T) {
 	}
 }
 
+func TestLogoutCookieHasTheSameSecureFlagAsLogin(t *testing.T) {
+	p := newPanel(t)
+	logout := func(proto string) string {
+		req, _ := http.NewRequest(http.MethodPost, p.url+"/api/logout", nil)
+		req.Header.Set("X-Procly", "1")
+		if proto != "" {
+			req.Header.Set("X-Forwarded-Proto", proto)
+		}
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		return res.Header.Get("Set-Cookie")
+	}
+	behindProxy := logout("https")
+	if !strings.Contains(behindProxy, "Secure") || !strings.Contains(behindProxy, "Max-Age=0") {
+		t.Errorf("logout behind an HTTPS proxy should expire a Secure cookie: %s", behindProxy)
+	}
+	plain := logout("")
+	if strings.Contains(plain, "Secure") || !strings.Contains(plain, "Max-Age=0") {
+		t.Errorf("plain HTTP logout should expire a cookie that is not Secure (the login one wasn't): %s", plain)
+	}
+}
+
 func TestLoginRateLimitOverHTTP(t *testing.T) {
 	p := newPanel(t)
 	for i := 0; i < maxFailures; i++ {
