@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.4.1
+
+A new `procly monit`.
+
+- **Layout**: panes with frames: processes, details and logs. Wide terminals put the table and the details side by side; narrow ones stack them, and table columns give way in order (pid, bars, uptime, health, restarts) so the name and status always fit. The header shows the machine's load and memory, and CPU on Linux.
+- **Catches up with v0.4.0**: instances show as one group with a summary line (`▾ api ×3`, `2/3 online`), which `←` `→` or a second click fold and unfold; actions on the group's line act on all of them, and restart goes one at a time. The details say what a process is doing in words (restarting, attempt 3 of 15; gave up after 15 restarts), and show health, `max_memory` (with the memory graph and the table turning yellow and red near it), `reload_signal`, `restart_every`, `restart_at` and the last few events. `R` reloads.
+- **Logs**: scroll back with `↑` `↓` (after `tab`), `pgup` `pgdn` or the mouse wheel; the pane pauses, counts new lines, and `f` follows again. `/` searches and shows only matching lines, highlighted. `e` switches between both streams, stderr only and stdout only, `w` wraps or cuts long lines. A group's logs are merged and each line names its instance. History from the two files (and from each instance) is interleaved instead of shown one file after the other, and escape codes and tabs from apps no longer break the layout.
+- **Finding things**: `/` on the table filters processes by name, `o` sorts by id, name, CPU, memory or restarts.
+- **Mouse**: click a row to select it, click the logs to focus them, scroll either with the wheel. Hold shift (option in iTerm2) to select text.
+- Keys that arrive together (key repeat, a paste) now each do their thing; before, they were ignored.
+
 ## v0.4.0
 
 Running apps for real: several copies of an app, memory limits, scheduled restarts, signals and reloads, `.env` files, an upgrade that restarts one app at a time, and a panel you can serve over HTTPS or put behind a proxy.

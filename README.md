@@ -272,19 +272,30 @@ environment variable values never leave the server, only their names.
 
 <picture>
   <source media="(prefers-color-scheme: light)" srcset="docs/monit-light.png">
-  <img alt="procly monit: live process table, CPU and memory sparklines, and streaming logs" src="docs/monit-dark.png">
+  <img alt="procly monit: process table with a group of instances, details with CPU and memory graphs, and streaming logs" src="docs/monit-dark.png">
 </picture>
 
-`procly monit` opens a full-screen view of every process with CPU and memory
-sparklines and the selected process's logs streaming underneath.
+`procly monit` opens a full-screen dashboard: every process with its CPU and
+memory, the selected one's details (state in words, CPU and memory graphs,
+`max_memory`, health, schedule, recent events), and its logs streaming
+underneath. Instances show as one group you can fold, with their logs merged
+and labelled. Wide terminals put the table and the details side by side,
+narrow ones stack them and drop the columns that do not fit, and the mouse
+works too (click a row, scroll the logs).
 
 | Key | Action |
 |---|---|
-| `↑` `↓` / `k` `j` | Select a process |
-| `r` | Restart |
+| `↑` `↓` / `k` `j` | Select a process; `←` `→` fold or unfold a group |
+| `r` | Restart (a group restarts one instance at a time) |
+| `R` | Reload with `reload_signal` |
 | `s` | Stop, or start if stopped |
 | `d` | Delete (asks first) |
-| `enter` | Expand logs, `esc` to go back |
+| `/` | Filter processes by name, or search the logs when they have focus |
+| `o` | Sort by id, name, CPU, memory or restarts |
+| `tab` | Switch between the table and the logs |
+| `pgup` `pgdn` / wheel | Scroll the logs (they pause; `f` follows again) |
+| `e` / `w` | stdout and stderr, stderr only, stdout only / wrap long lines |
+| `enter` | Logs full screen, `esc` to go back |
 | `?` | All keys |
 | `q` | Quit (processes keep running) |
 

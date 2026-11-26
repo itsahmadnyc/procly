@@ -55,8 +55,8 @@ func loaded(t *testing.T) model {
 
 func TestSelectionKeys(t *testing.T) {
 	m := loaded(t)
-	if m.selName != "api" {
-		t.Fatalf("first process should be selected, got %q", m.selName)
+	if m.sel.name != "api" {
+		t.Fatalf("first process should be selected, got %q", m.sel.name)
 	}
 	steps := []struct{ key, want string }{
 		{"j", "web"}, {"down", "mailer"}, {"j", "mailer"}, // stops at the end
@@ -64,8 +64,8 @@ func TestSelectionKeys(t *testing.T) {
 	}
 	for _, s := range steps {
 		m, _ = send(m, key(s.key))
-		if m.selName != s.want {
-			t.Fatalf("after %q: selected %q, want %q", s.key, m.selName, s.want)
+		if m.sel.name != s.want {
+			t.Fatalf("after %q: selected %q, want %q", s.key, m.sel.name, s.want)
 		}
 	}
 }
@@ -76,16 +76,16 @@ func TestSelectionFollowsTheProcessNotThePosition(t *testing.T) {
 	reordered := infos(t)
 	reordered[0], reordered[1] = reordered[1], reordered[0]
 	m, _ = send(m, listMsg{infos: reordered})
-	if m.selName != "web" {
-		t.Fatalf("selection jumped to %q when the list changed order", m.selName)
+	if m.sel.name != "web" {
+		t.Fatalf("selection jumped to %q when the list changed order", m.sel.name)
 	}
 	m, _ = send(m, listMsg{infos: infos(t)[2:]}) // web is gone
-	if m.selName != "mailer" {
-		t.Fatalf("after the selected process vanished: %q", m.selName)
+	if m.sel.name != "mailer" {
+		t.Fatalf("after the selected process vanished: %q", m.sel.name)
 	}
 	m, _ = send(m, listMsg{infos: nil})
-	if m.selName != "" || !strings.Contains(m.View(), "No processes yet") {
-		t.Fatalf("empty list: sel %q\n%s", m.selName, m.View())
+	if m.sel.name != "" || !strings.Contains(m.View(), "No processes yet") {
+		t.Fatalf("empty list: sel %q\n%s", m.sel.name, m.View())
 	}
 }
 
@@ -145,7 +145,7 @@ func TestHelpZoomAndQuit(t *testing.T) {
 		t.Fatal("? should open help")
 	}
 	m, _ = send(m, key("j"))
-	if m.help || m.selName != "api" {
+	if m.help || m.sel.name != "api" {
 		t.Fatal("the key that closes help must not also act")
 	}
 	m, _ = send(m, key("enter"))
@@ -286,7 +286,7 @@ func TestViewStates(t *testing.T) {
 	}
 	m, _ = send(m, listMsg{infos: infos(t)})
 	view := m.View()
-	for _, want := range []string{"3 processes", "2 online", "1 errored", "api", "$ node api.js", "enter to expand"} {
+	for _, want := range []string{"3 processes", "2 online", "1 errored", "api", "$ node api.js", "Logs · api"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("view is missing %q", want)
 		}
