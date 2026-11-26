@@ -67,5 +67,26 @@ func Load(path string) ([]proc.Spec, error) {
 			a.Cwd = filepath.Join(dir, a.Cwd)
 		}
 	}
-	return f.Apps, nil
+	// instances: N becomes N specs named name-1 .. name-N; the names must still be unique.
+	var out []proc.Spec
+	names := map[string]string{} // name -> the app that made it
+	for _, a := range f.Apps {
+		expanded, err := proc.Expand(a)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", filepath.Base(path), err)
+		}
+		for _, e := range expanded {
+			if other, dup := names[e.Name]; dup {
+				return nil, fmt.Errorf("%s: %q is made by both %q and %q", filepath.Base(path), e.Name, other, a.Name)
+			}
+			names[e.Name] = a.Name
+			out = append(out, e)
+		}
+		if a.Instances > 1 {
+			if _, clash := names[a.Name]; clash {
+				return nil, fmt.Errorf("%s: %q is both an app and the name of a group of instances", filepath.Base(path), a.Name)
+			}
+		}
+	}
+	return out, nil
 }

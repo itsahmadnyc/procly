@@ -845,3 +845,88 @@ func TestCLIWebTLS(t *testing.T) {
 	contains(t, c.fails("web", "--port", "1", "--tls-cert", certFile), "--tls-cert and --tls-key go together")
 	contains(t, c.fails("web", "--port", "1", "--tls-cert", filepath.Join(c.dir, "no.pem"), "--tls-key", keyFile), "no.pem")
 }
+
+func TestCLIInstances(t *testing.T) {
+	c := newCLI(t)
+	// Each instance writes what it was told and derives a "port" the way the docs show.
+	c.file("worker.sh", "echo \"$PROCLY_INSTANCE of $PROCLY_INSTANCES\" > \"seen-$PROCLY_INSTANCE.txt\"\nsleep 30\n")
+	out := c.ok("start", "worker.sh", "--name", "queue", "--instances", "3")
+	contains(t, out, "started queue-1", "started queue-2", "started queue-3")
+
+	for i := 0; i < 3; i++ {
+		f := filepath.Join(c.dir, "seen-"+strconv.Itoa(i)+".txt")
+		want := strconv.Itoa(i) + " of 3"
+		waitFor(t, f, func() bool { b, err := os.ReadFile(f); return err == nil && strings.TrimSpace(string(b)) == want })
+	}
+	c.ok("start", "sh -c 'echo $((3000 + PROCLY_INSTANCE)) > port-$PROCLY_INSTANCE.txt; sleep 30'", "--name", "calc", "--instances", "2")
+	for i, want := range []string{"3000", "3001"} {
+		f := filepath.Join(c.dir, "port-"+strconv.Itoa(i)+".txt")
+		waitFor(t, f, func() bool { b, err := os.ReadFile(f); return err == nil && strings.TrimSpace(string(b)) == want })
+	}
+
+	// ls shows them grouped: a summary line, and the instances under it.
+	list := c.ok("ls")
+	contains(t, list, "queue ×3", "3 online", "queue-1", "queue-2", "queue-3", "calc ×2")
+	li := strings.Index(list, "queue ×3")
+	if strings.Index(list, "queue-1") < li || strings.Index(list, "queue-3") < strings.Index(list, "queue-1") {
+		t.Errorf("the instances should follow their group, in order:\n%s", list)
+	}
+
+	// JSON stays flat, with the group fields for whoever wants to group them.
+	var views []struct {
+		Name      string `json:"name"`
+		Group     string `json:"group"`
+		Index     int    `json:"index"`
+		Instances int    `json:"instances"`
+	}
+	if err := json.Unmarshal([]byte(c.ok("ls", "--json")), &views); err != nil || len(views) != 5 {
+		t.Fatalf("ls --json: %d views, %v", len(views), err)
+	}
+	if v := views[1]; v.Name != "queue-2" || v.Group != "queue" || v.Index != 1 || v.Instances != 3 {
+		t.Errorf("queue-2 in JSON: %+v", v)
+	}
+
+	// describe: an instance says where it belongs; the group name says what to do.
+	contains(t, c.ok("describe", "queue-2"), "group", "queue, instance 2 of 3", "PROCLY_INSTANCE=1")
+	contains(t, c.fails("describe", "queue"), "group of 3 instances", "queue-1")
+
+	// Names that are taken are refused up front, without starting part of the group.
+	contains(t, c.fails("start", "worker.sh", "--name", "queue", "--instances", "2"), "queue-1 already exists")
+	c.ok("start", "sleep 31", "--name", "solo")
+	contains(t, c.fails("start", "sleep 32", "--name", "solo", "--instances", "2"), "solo is already a process")
+
+	// stop, restart and delete with the base name act on all of them; the others are untouched.
+	out = c.ok("stop", "queue")
+	contains(t, out, "stopped queue-1", "stopped queue-2", "stopped queue-3")
+	contains(t, c.ok("ls"), "3 stopped", "2 online")
+	contains(t, c.fails("start", "queue", "--instances", "9"), "queue-1 already exists") // a group that exists is not started a second time
+	out = c.ok("start", "queue")                                                         // starts the stopped group again
+	contains(t, out, "started queue-1", "started queue-2", "started queue-3")
+	contains(t, c.fails("start", "queue"), "already running")
+	out = c.ok("restart", "queue")
+	contains(t, out, "restarted queue-1", "restarted queue-3")
+
+	// save and resurrect keep the group.
+	c.ok("save")
+	c.ok("kill")
+	c.ok("resurrect")
+	list = c.ok("ls")
+	contains(t, list, "queue ×3", "calc ×2", "solo")
+	contains(t, c.ok("delete", "queue"), "deleted queue-1", "deleted queue-3")
+	after := c.ok("ls")
+	if strings.Contains(after, "queue") || !strings.Contains(after, "calc ×2") {
+		t.Errorf("deleting the group removes only the group:\n%s", after)
+	}
+}
+
+func TestCLIInstancesInAConfigFile(t *testing.T) {
+	c := newCLI(t)
+	c.file("procly.yml", "apps:\n  - name: api\n    command: sleep 30\n  - name: queue\n    command: sleep 31\n    instances: 2\n")
+	out := c.ok("start", "procly.yml")
+	contains(t, out, "started api", "started queue-1", "started queue-2")
+	contains(t, c.ok("ls"), "queue ×2")
+	c.file("bad.yml", "apps:\n  - name: q\n    command: sleep 1\n    instances: 1000\n")
+	contains(t, c.fails("start", "bad.yml"), "instances must be between")
+	contains(t, c.fails("start", "sleep 1", "--name", "x", "--instances", "0"), "--instances must be a number")
+	contains(t, c.fails("start", "sleep 1", "--name", "x", "--instances", "abc"), "--instances must be a number")
+}

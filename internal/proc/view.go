@@ -30,6 +30,9 @@ type View struct {
 	MaxRestarts    int    `json:"max_restarts"`
 	RestartDelayMs int64  `json:"restart_delay_ms"`
 	KillTimeoutMs  int64  `json:"kill_timeout_ms"`
+	Group          string `json:"group,omitempty"`     // base name when this is one of several instances
+	Index          int    `json:"index,omitempty"`     // its place in the group, from 0
+	Instances      int    `json:"instances,omitempty"` // how many there are in the group
 	RestartEvery   string `json:"restart_every,omitempty"`
 	RestartAt      string `json:"restart_at,omitempty"`
 	StopSignal     string `json:"stop_signal,omitempty"`   // as configured, empty for SIGTERM
@@ -67,6 +70,10 @@ func NewView(in Info) View {
 	v.MaxRestarts = in.Spec.MaxRestartsOrDefault()
 	v.RestartDelayMs = in.Spec.restartDelay().Milliseconds()
 	v.KillTimeoutMs = in.Spec.killTimeout().Milliseconds()
+	v.Group, v.Index = in.Spec.Group, in.Spec.Index
+	if in.Spec.Group != "" {
+		v.Instances = in.Spec.Instances
+	}
 	v.RestartEvery, v.RestartAt = in.Spec.RestartEvery, in.Spec.RestartAt
 	v.StopSignal, v.ReloadSignal = SignalName(in.Spec.StopSignal), SignalName(in.Spec.ReloadSignal)
 	v.MaxMemory, _ = in.Spec.maxMemoryBytes()

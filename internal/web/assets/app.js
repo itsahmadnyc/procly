@@ -526,11 +526,20 @@ $("confirm-cancel").addEventListener("click", () => $("confirm").close("cancel")
 
 // ---------- actions ----------
 
-async function act(server, name, verb) {
+async function act(server, name, verb, count) {
   const k = key(server, name);
   if (S.busy.has(k)) return;
+  const group = count > 1; // the base name of instances: one question, and it says how many
   if (CONFIRM[verb]) {
     const spec = CONFIRM[verb](name);
+    if (group) {
+      const what = `${count} processes`;
+      spec.title = verb === "delete" ? `Delete ${name} (${what})?` : verb === "restart" ? `Restart ${name} (${what})?` : `Stop ${name} (${what})?`;
+      spec.text = verb === "restart" ? `procly restarts all ${count} instances one after another, so the others keep serving while one restarts.`
+        : verb === "stop" ? `All ${count} instances of ${name} are stopped, and stay down until you start them again.`
+        : `All ${count} instances are stopped and removed from procly. Their log files stay on disk.`;
+      if (verb === "delete") spec.ok = `Delete ${count} processes`;
+    }
     const p = fresh(server, name);
     if (verb === "stop" && p && p.status === "orphaned") {
       spec.text = `It is left over from a daemon that died. Stopping ends it and procly forgets it; start it again afterwards (procly resurrect brings back the saved list).`;
@@ -541,7 +550,7 @@ async function act(server, name, verb) {
   refresh();
   try {
     await api("POST", `${srvPath(server)}/processes/${encodeURIComponent(name)}/${verb}`);
-    toast(`${past[verb]} ${name}` + (server === "local" ? "" : ` on ${serverLabel(server)}`));
+    toast(`${past[verb]} ${name}` + (group ? ` (${count} processes)` : "") + (server === "local" ? "" : ` on ${serverLabel(server)}`));
     if (verb === "delete" && current.page === "process" && current.name === name) go(`#/s/${encodeURIComponent(server)}/processes`);
   } catch (err) {
     if (!handleErr(err)) toast(err.message, true);
@@ -1034,7 +1043,20 @@ PAGES.processes = () => {
         (!f || p.name.toLowerCase().includes(f) || p.command.toLowerCase().includes(f)));
       refs.shown.textContent = list.length ? `${vis.length} of ${list.length}` : "";
 
-      fill(refs.body, ...vis.map((p) => procRow(srv, p)));
+      // Instances of one app read as one row that opens. Searching opens them all,
+      // so a match inside a group is never hidden.
+      const rows = [], seenGroups = new Set(), byIndex = (a, b) => (a.index || 0) - (b.index || 0);
+      for (const p of vis) {
+        if (!p.group) { rows.push(procRow(srv, p)); continue; }
+        if (seenGroups.has(p.group)) continue;
+        seenGroups.add(p.group);
+        const everyone = list.filter((x) => x.group === p.group).sort(byIndex);
+        const members = vis.filter((x) => x.group === p.group).sort(byIndex);
+        const open = f !== "" || isExpanded(srv, p.group);
+        rows.push(groupRow(srv, p.group, everyone, open, () => { toggleExpanded(srv, p.group); this.update(); }));
+        if (open) members.forEach((m) => rows.push(procRow(srv, m, true)));
+      }
+      fill(refs.body, ...rows);
       const emptyBoxes = h("div");
       if (entry && entry.error) emptyBoxes.append(emptyBox("alert", `Can't reach ${serverLabel(srv)}`, entry.error));
       else if (entry && !list.length) {
@@ -1048,12 +1070,68 @@ PAGES.processes = () => {
   };
 };
 
-function procRow(server, p) {
+// Which groups are open is remembered in this browser.
+const expandedKey = (server, group) => server + "|" + group;
+function expandedSet() { try { return new Set(JSON.parse(load("procly.expanded") || "[]")); } catch { return new Set(); } }
+const isExpanded = (server, group) => expandedSet().has(expandedKey(server, group));
+function toggleExpanded(server, group) {
+  const set = expandedSet(), k = expandedKey(server, group);
+  set.has(k) ? set.delete(k) : set.add(k);
+  store("procly.expanded", JSON.stringify([...set]));
+}
+
+// groupSummary says how the instances of a group are doing, as one status.
+function groupSummary(members) {
+  const c = countStatus(members), n = members.length;
+  if (c.online === n) return { cls: "online", text: `${n} online` };
+  if (c.stopped === n) return { cls: "stopped", text: `${n} stopped` };
+  if (c.online === 0 && c.errored > 0) return { cls: "errored", text: c.errored === n ? `${n} errored` : `${c.errored} errored, ${n - c.errored} not running` };
+  const parts = [c.online && `${c.online} online`, c.waiting && `${c.waiting} restarting`, c.errored && `${c.errored} errored`, c.orphaned && `${c.orphaned} orphaned`, c.stopped && `${c.stopped} stopped`].filter(Boolean);
+  return { cls: "waiting-static", text: parts.join(", ") };
+}
+
+// groupRow is the row for several instances of one app: totals, and actions
+// that act on all of them (the daemon takes the base name for the group).
+function groupRow(server, group, members, open, onToggle) {
+  const sum = groupSummary(members);
+  const up = members.filter((p) => p.pid > 0);
+  const busy = S.busy.has(key(server, group));
+  const anyRunning = members.some(running);
+  const n = members.length;
+  const verbOf = () => (members.some(running) ? "stop" : "start");
+  return h("tr", { class: "click group-row", "data-key": "g:" + group, onclick: onToggle, "aria-expanded": String(open) },
+    h("td", {}, h("div", { class: "group-name" }, h("span", { class: "chev" + (open ? " open" : "") }, icon("chevronRight")),
+      h("div", { class: "cell-name" }, h("b", { text: group, title: group }), h("span", { text: `${n} instances · ${members[0].command}`, title: members[0].command })))),
+    h("td", {}, busy ? h("span", { class: "status waiting", text: progressive[S.busy.get(key(server, group))] } ) : h("span", { class: "status " + sum.cls, text: sum.text })),
+    h("td", { class: "hide-md" }, h("span", { class: "health-ic none", text: members.some((p) => p.health === "unhealthy") ? "unhealthy" : "–" })),
+    h("td", { class: "num r" + (up.length ? "" : " dim"), text: up.length ? up.reduce((a, p) => a + p.cpu, 0).toFixed(1) + "%" : "–" }),
+    h("td", { class: "num r hide-sm" + (up.length ? "" : " dim"), text: up.length ? fmtBytes(up.reduce((a, p) => a + p.memory, 0)) : "–" }),
+    h("td", { class: "num r hide-sm dim", text: "–" }),
+    h("td", { class: "num r hide-sm" + (members.some((p) => p.restarts) ? " warn" : " dim"), text: members.reduce((a, p) => a + p.restarts, 0) }),
+    h("td", {}, h("div", { class: "cell-actions" },
+      h("button", { class: "icon-btn hide-sm", type: "button", title: `Restart all ${n}, one at a time`, "aria-label": `Restart ${group}`, disabled: busy, onclick: (e) => { e.stopPropagation(); act(server, group, "restart", n); } }, icon("restart")),
+      h("button", { class: "icon-btn hide-sm", type: "button", title: anyRunning ? `Stop all ${n}` : `Start all ${n}`, "aria-label": `${anyRunning ? "Stop" : "Start"} ${group}`, disabled: busy, onclick: (e) => { e.stopPropagation(); act(server, group, verbOf(), n); } }, icon(anyRunning ? "stop" : "play")),
+      h("button", { class: "icon-btn", type: "button", title: "More", "aria-label": `More actions for ${group}`, "aria-haspopup": "menu", onclick: (e) => { e.stopPropagation(); popMenu(e.currentTarget, groupMenu(server, group, members)); } }, icon("more")))));
+}
+
+function groupMenu(server, group, members) {
+  const busy = S.busy.has(key(server, group)), n = members.length;
+  const anyRunning = members.some(running);
+  return [
+    { label: `Restart all ${n}`, icon: "restart", disabled: busy, onclick: () => act(server, group, "restart", n) },
+    members[0].reload_signal && members.some((p) => p.status === "online") && { label: "Reload all", icon: "pulse", disabled: busy, onclick: () => act(server, group, "reload", n) },
+    { label: anyRunning ? `Stop all ${n}` : `Start all ${n}`, icon: anyRunning ? "stop" : "play", disabled: busy, onclick: () => act(server, group, anyRunning ? "stop" : "start", n) },
+    "sep",
+    { label: "Delete the group", icon: "trash", danger: true, disabled: busy, onclick: () => act(server, group, "delete", n) },
+  ].filter(Boolean);
+}
+
+function procRow(server, p, child) {
   const href = `#/s/${encodeURIComponent(server)}/p/${encodeURIComponent(p.name)}`;
   const up = p.pid > 0;
   const hst = S.hist.get(key(server, p.name));
   const busy = S.busy.has(key(server, p.name));
-  const tr = h("tr", { class: "click", "data-key": "p:" + p.name, onclick: () => go(href) },
+  const tr = h("tr", { class: "click" + (child ? " child-row" : ""), "data-key": "p:" + p.name, onclick: () => go(href) },
     h("td", {}, h("div", { class: "cell-name" }, h("b", { text: p.name, title: p.name }), h("span", { text: p.command, title: p.command }))),
     h("td", {}, statusEl(server, p)),
     h("td", { class: "hide-md" }, healthEl(p)),

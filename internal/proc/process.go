@@ -145,7 +145,7 @@ func (p *Process) launchLocked() error {
 
 	cmd := exec.Command("/bin/sh", "-c", shellCommand(p.spec.Command))
 	cmd.Dir = p.spec.Cwd
-	cmd.Env = buildEnv(fileEnv, p.spec.Env, p.id, p.spec.Name)
+	cmd.Env = buildEnv(fileEnv, p.spec.Env, p.id, p.spec.Name, p.spec.Group != "", p.spec.Index, p.spec.Instances)
 	cmd.Stdout = out
 	cmd.Stderr = errf
 	// Own process group, so stop can signal the whole tree.
@@ -424,7 +424,7 @@ func shellCommand(c string) string {
 
 // buildEnv is procly's own environment, then the env files, then the spec's
 // env. Go's exec keeps the last value of a repeated name, so later wins.
-func buildEnv(files, extra map[string]string, id int, name string) []string {
+func buildEnv(files, extra map[string]string, id int, name string, grouped bool, index, count int) []string {
 	env := os.Environ()
 	for k, v := range files {
 		env = append(env, k+"="+v)
@@ -432,7 +432,11 @@ func buildEnv(files, extra map[string]string, id int, name string) []string {
 	for k, v := range extra {
 		env = append(env, k+"="+v)
 	}
-	return append(env, "PROCLY_ID="+strconv.Itoa(id), "PROCLY_NAME="+name)
+	env = append(env, "PROCLY_ID="+strconv.Itoa(id), "PROCLY_NAME="+name)
+	if grouped { // 0-based, so an app can derive a port: 3000 + PROCLY_INSTANCE
+		env = append(env, "PROCLY_INSTANCE="+strconv.Itoa(index), "PROCLY_INSTANCES="+strconv.Itoa(count))
+	}
+	return env
 }
 
 func exitCodeOf(err error) int {

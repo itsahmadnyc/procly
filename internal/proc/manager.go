@@ -54,6 +54,17 @@ func (m *Manager) Start(spec Spec) (Info, error) {
 		m.watchMemory()
 	}
 	m.mu.Lock()
+	// A group's base name and a plain process's name must not be the same word,
+	// or "restart queue" would mean two different things.
+	if spec.Group == "" {
+		if g := m.groupMembersLocked(spec.Name); len(g) > 0 {
+			m.mu.Unlock()
+			return Info{}, fmt.Errorf("%s is a group of %d instances; delete it first, or choose another name", spec.Name, len(g))
+		}
+	} else if _, clash := m.procs[spec.Group]; clash {
+		m.mu.Unlock()
+		return Info{}, fmt.Errorf("%s is already a process; delete it first, or choose another name for the group", spec.Group)
+	}
 	p, exists := m.procs[spec.Name]
 	if !exists {
 		p = newProcess(m.nextID, spec, m.logDir, m.logger, m.events)
@@ -81,6 +92,13 @@ func (m *Manager) Get(target string) (Info, error) {
 	ps, err := m.resolve(target)
 	if err != nil {
 		return Info{}, err
+	}
+	if len(ps) > 1 && target != "all" {
+		names := make([]string, len(ps))
+		for i, p := range ps {
+			names[i] = p.Info().Name
+		}
+		return Info{}, groupError(target, names)
 	}
 	infos := []Info{ps[0].Info()}
 	attachStats(infos)
@@ -118,6 +136,9 @@ func (m *Manager) Reload(target string) ([]Info, error) {
 		return nil, err
 	}
 	if target != "all" {
+		if isGroup(target, ps) {
+			return infosOf(ps), inOrder(ps, (*Process).Reload)
+		}
 		err = each(ps, (*Process).Reload)
 		return infosOf(ps), err
 	}
@@ -142,6 +163,9 @@ func (m *Manager) Restart(target string) ([]Info, error) {
 	ps, err := m.resolve(target)
 	if err != nil {
 		return nil, err
+	}
+	if isGroup(target, ps) {
+		return infosOf(ps), inOrder(ps, (*Process).Restart) // one at a time: the others keep serving
 	}
 	err = each(ps, (*Process).Restart)
 	return infosOf(ps), err
@@ -242,6 +266,9 @@ func (m *Manager) resolve(target string) ([]*Process, error) {
 	if p, ok := m.procs[target]; ok {
 		return []*Process{p}, nil
 	}
+	if ps := m.groupMembersLocked(target); len(ps) > 0 {
+		return ps, nil // the base name of instances stands for all of them
+	}
 	if id, err := strconv.Atoi(target); err == nil {
 		for _, p := range m.procs {
 			if p.id == id {
@@ -262,6 +289,28 @@ func (m *Manager) sortedLocked() []*Process {
 }
 
 // each runs fn on every process concurrently and joins the errors.
+// isGroup reports whether target named several processes, as a group's base name does.
+func isGroup(target string, ps []*Process) bool {
+	if target == "all" || len(ps) == 0 {
+		return false
+	}
+	ps[0].mu.Lock()
+	defer ps[0].mu.Unlock()
+	return ps[0].spec.Group == target
+}
+
+// inOrder runs fn on each process in turn and gathers the errors; a restart
+// that goes one by one never takes every instance down at once.
+func inOrder(ps []*Process, fn func(*Process) error) error {
+	var errs []error
+	for _, p := range ps {
+		if err := fn(p); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
 func each(ps []*Process, fn func(*Process) error) error {
 	var wg sync.WaitGroup
 	errs := make([]error, len(ps))

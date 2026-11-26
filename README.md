@@ -421,6 +421,29 @@ apps:
 procly start procly.yml
 ```
 
+`instances: 4` (or `--instances 4`) starts four copies of the same app for workers, or for
+apps that listen on different ports behind a proxy. They are four ordinary processes named
+`queue-1` to `queue-4`, each with its own logs, and each gets `PROCLY_INSTANCE` (0 to 3) and
+`PROCLY_INSTANCES` (4) in its environment. `stop`, `restart`, `reload` and `delete` with the
+base name (`procly restart queue`) act on all of them, and a group restart goes **one instance
+at a time**, so the others keep serving while one restarts. Name one (`queue-2`, or its id) to
+act on just that one. `ls` shows them grouped under a summary line, and so does the panel (a row
+that opens, with one confirmation that says how many processes it affects); `ls --json` stays
+flat, with `group`, `index` and `instances` on each. `save` and `resurrect` keep the group.
+`instances: 1` is a single process with the plain name, and a group's name cannot also be the
+name of a process.
+
+These are separate processes, not PM2's cluster mode: they do not share a listening port.
+Give each its own, from `PROCLY_INSTANCE`; the command runs in a shell, so arithmetic works
+(there is no `port_base` setting, this does the same):
+
+```yaml
+apps:
+  - name: web
+    command: node server.js --port $((3000 + PROCLY_INSTANCE))
+    instances: 4
+```
+
 `restart_every: 24h` and `restart_at: "04:00"` (or `--restart-every`, `--restart-at`) are for
 the nightly restart that hides a slow leak or stale connections. `restart_every` counts
 from each start, so a manual restart moves the next one; `restart_at` is a fixed time of
@@ -466,6 +489,7 @@ file name and line number. The panel and `procly describe` show the names, never
 | `env` | | added to the environment |
 | `env_file` | | a path or a list of paths to `.env` style files, read on every start; later files override earlier ones and `env` overrides them all |
 | `autorestart` | `true` | |
+| `instances` | | start this many copies, named `name-1` .. `name-N` (1 to 64); see below |
 | `max_memory` | | restart when the process and everything it started use more than this (e.g. `500MB`); see below |
 | `restart_every` | | restart the process this long after each start, e.g. `24h` or `90m` (a unit is required, at least one minute) |
 | `restart_at` | | restart it every day at this time, e.g. `"04:00"` (24 hours, the server's local time) |
@@ -498,11 +522,12 @@ The everyday commands are the same:
 | `pm2 save` / `pm2 resurrect` | `procly save` / `procly resurrect` |
 | `pm2 startup` | `procly startup` |
 | `pm2 kill` | `procly kill` |
+| `pm2 start app.js -i 4` | `procly start app.js --instances 4` (separate processes, not cluster mode: one port each) |
 | `pm2 start app.js --cron-restart "0 4 * * *"` | `restart_at: "04:00"` or `restart_every: 24h` (no cron expressions) |
 | `pm2 sendSignal SIGHUP api` | `procly reload api` with `reload_signal: SIGHUP` |
 | `pm2 start app.js --max-memory-restart 500M` | `procly start app.js --max-memory 500MB` |
 
-What procly does **not** do (yet): cluster mode and zero-downtime `reload` (`procly reload`
+What procly does **not** do (yet): cluster mode (several copies sharing one port; `instances` runs separate processes) and zero-downtime `reload` (`procly reload`
 sends a signal to one process; it is only as graceful as the app),
 restart-on-file-change (`--watch`), `pm2 deploy`, and Windows. If you rely on those, PM2 is still the better fit. In exchange you get
 the web panel, several servers in one place, and health checks and alerts built
