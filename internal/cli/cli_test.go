@@ -58,12 +58,18 @@ func specFor(t *testing.T, cwd string, argv ...string) proc.Spec {
 
 func TestBuildSpecFromFiles(t *testing.T) {
 	dir := t.TempDir()
-	for _, f := range []string{"server.js", "worker.py", "job.sh", "my app.js"} {
+	for _, f := range []string{"server.js", "worker.py", "job.sh", "my app.js", "app.mjs", "app.cjs", "UPPER.MJS", "page.TS"} {
 		if err := os.WriteFile(filepath.Join(dir, f), nil, 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
 	if err := os.WriteFile(filepath.Join(dir, "bin-tool"), nil, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(dir, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "sub", "tool"), nil, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	cases := []struct {
@@ -75,6 +81,11 @@ func TestBuildSpecFromFiles(t *testing.T) {
 		{[]string{"job.sh"}, "bash job.sh", "job"},
 		{[]string{"bin-tool"}, "./bin-tool", "bin-tool"},
 		{[]string{"my app.js"}, "node 'my app.js'", "my-app"},
+		{[]string{"app.mjs"}, "node app.mjs", "app"},
+		{[]string{"app.cjs"}, "node app.cjs", "app"},
+		{[]string{"UPPER.MJS"}, "node UPPER.MJS", "UPPER"}, // extensions are matched in lower case
+		{[]string{"page.TS"}, "npx tsx page.TS", "page"},
+		{[]string{"sub/tool"}, "sub/tool", "tool"}, // an executable in a folder is run as it is, not found on PATH
 		{[]string{"server.js", "--name", "api", "--", "--port", "3000", "it's"}, `node server.js --port 3000 'it'\''s'`, "api"},
 	}
 	for _, c := range cases {
@@ -87,9 +98,20 @@ func TestBuildSpecFromFiles(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "notes.txt"), nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	a, _ := parse([]string{"notes.txt", "--cwd", dir}, startFlags)
-	if _, err := buildSpec(a); err == nil || !strings.Contains(err.Error(), "don't know how to run") {
-		t.Errorf("unknown file type: %v", err)
+	// A file that cannot be run says what to type, using its own name and, for a
+	// few types, the right tool.
+	for file, want := range map[string]string{
+		"notes.txt": `procly start "<command> notes.txt"`,
+		"main.go":   `procly start "go run main.go"`,
+		"app.jar":   `procly start "java -jar app.jar"`,
+	} {
+		if err := os.WriteFile(filepath.Join(dir, file), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		a, _ := parse([]string{file, "--cwd", dir}, startFlags)
+		if _, err := buildSpec(a); err == nil || !strings.Contains(err.Error(), "don't know how to run "+file) || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: error %v, want it to contain %q", file, err, want)
+		}
 	}
 }
 

@@ -89,6 +89,11 @@ procly ls
   2 processes · 2 online
 ```
 
+`start` runs a file by its extension (`.js`, `.mjs`, `.cjs` with `node`, `.ts` with
+`npx tsx`, `.py`, `.rb`, `.php`, `.pl`, `.sh`), runs any executable file as it is
+(`procly start ./server`), and takes any other command in quotes
+(`procly start "go run ."`).
+
 Then open the dashboards, and make it all come back after a reboot:
 
 ```sh
