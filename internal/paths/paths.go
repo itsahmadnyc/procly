@@ -45,6 +45,10 @@ func DumpFile() string  { return filepath.Join(Home(), "dump.json") }
 // tell which of them outlived it.
 func RunFile() string { return filepath.Join(Home(), "running.json") }
 
+// UpgradeFile holds what an upgrade is handing to the new daemon, so an
+// interrupted upgrade can be finished by running it again.
+func UpgradeFile() string { return filepath.Join(Home(), "upgrade.json") }
+
 // Ensure creates the state directories with owner-only permissions.
 func Ensure() error {
 	return os.MkdirAll(LogDir(), 0o700)

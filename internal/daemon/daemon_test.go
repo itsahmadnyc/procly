@@ -24,7 +24,7 @@ func newAPI(t *testing.T) *api {
 	m := proc.NewManager(t.TempDir(), log.New(io.Discard, "", 0))
 	t.Cleanup(func() { m.StopAll() })
 	a := &api{t: t}
-	a.h = newHandler(m, func() { a.shutdown++ })
+	a.h = newHandler(m, func() { a.shutdown++ }, func() { a.shutdown++ })
 	return a
 }
 

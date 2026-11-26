@@ -61,6 +61,8 @@ Servers behind NAT (they dial in)
   agent connect                 Stay connected to the hub, reconnecting as needed
 
 State
+  upgrade                       Install the latest release and hand the daemon over
+                                (--check, --dry-run, --no-restart, --version <v>)
   save                          Remember the current process list
   resurrect                     Start everything from the last save
   startup                       Start procly on boot (systemd / launchd)
@@ -114,6 +116,8 @@ func Run(argv []string) int {
 		err = cmdStart(rest)
 	case "stop", "restart", "reload", "delete", "rm", "del":
 		err = cmdAction(cmd, rest)
+	case "upgrade":
+		err = cmdUpgrade(rest)
 	case "list", "ls", "l", "status":
 		err = cmdList(rest)
 	case "describe", "show", "info":
@@ -169,12 +173,19 @@ func ensureDaemon() (*client.Client, error) {
 	if err != nil {
 		return nil, err
 	}
+	return startDaemon(c, exe)
+}
+
+// startDaemon starts a daemon from the binary at exe (an upgrade starts the new
+// one) and waits for it to answer.
+func startDaemon(c *client.Client, exe string) (*client.Client, error) {
 	logf, err := os.OpenFile(paths.DaemonLog(), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return nil, err
 	}
 	defer logf.Close()
 	cmd := exec.Command(exe, "daemon")
+	cmd.Env = append(os.Environ(), "PROCLY_DAEMON_SPAWNED=1") // so the daemon knows nothing supervises it
 	cmd.Dir = "/"
 	cmd.Stdout, cmd.Stderr = logf, logf
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}

@@ -128,6 +128,56 @@ func (m *Manager) Stop(target string) ([]Info, error) {
 	return infosOf(ps), nil
 }
 
+// HandoverEntry is one process in a handover to a new daemon: how to run it,
+// and whether it was up.
+type HandoverEntry struct {
+	Spec    Spec `json:"spec"`
+	Running bool `json:"running"`
+}
+
+// Handover lists what a new daemon has to take over, in id order: every process
+// that is managed here (orphans are not ours to pass on). It changes nothing; the
+// daemon then exits without stopping the processes.
+func (m *Manager) Handover() []HandoverEntry {
+	m.mu.Lock()
+	ps := m.sortedLocked()
+	m.mu.Unlock()
+	out := []HandoverEntry{}
+	for _, p := range ps {
+		in := p.Info()
+		if in.Status == StatusOrphaned {
+			continue
+		}
+		out = append(out, HandoverEntry{Spec: in.Spec, Running: in.Status == StatusOnline || in.Status == StatusWaiting})
+	}
+	return out
+}
+
+// Add registers a process without starting it, so a stopped process can be
+// carried over to a new daemon as it was.
+func (m *Manager) Add(spec Spec) (Info, error) {
+	if err := spec.Validate(); err != nil {
+		return Info{}, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if spec.Group == "" {
+		if g := m.groupMembersLocked(spec.Name); len(g) > 0 {
+			return Info{}, fmt.Errorf("%s is a group of %d instances; delete it first, or choose another name", spec.Name, len(g))
+		}
+	} else if _, clash := m.procs[spec.Group]; clash {
+		return Info{}, fmt.Errorf("%s is already a process; delete it first, or choose another name for the group", spec.Group)
+	}
+	if _, exists := m.procs[spec.Name]; exists {
+		return Info{}, fmt.Errorf("%s already exists", spec.Name)
+	}
+	p := newProcess(m.nextID, spec, m.logDir, m.logger, m.events)
+	p.changed = m.noteChanged
+	m.nextID++
+	m.procs[spec.Name] = p
+	return p.Info(), nil
+}
+
 // Reload sends the reload signal. For "all" it reaches every running process
 // that has one and fails only when none does; naming a process that has none fails.
 func (m *Manager) Reload(target string) ([]Info, error) {
@@ -191,8 +241,7 @@ func (m *Manager) Delete(target string) ([]Info, error) {
 func (m *Manager) StopAll() []Info {
 	// The memory sampler goes first, and StopAll waits for it, so a restart it
 	// was in the middle of cannot bring a process back after this returns.
-	m.memStop.Do(func() { close(m.memDone) })
-	m.memWG.Wait()
+	m.StopWatching()
 	infos, _ := m.Stop("all")
 	return infos
 }
