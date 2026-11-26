@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- `max_memory`: restart a process that uses too much memory. `max_memory: 500MB` in `procly.yml` or `--max-memory 500MB` on `start`; the process and everything it started (its process group) are measured every five seconds. A restart is recorded as a `memory` event (shown in the panel's Events tab), sends an alert, and does not count toward `max_restarts`. `describe` and the process page show the limit.
 - Secrets without a command-line argument: `procly alerts telegram`, `alerts slack`, `agent join` and `server add` also read the token or webhook from an environment variable (`PROCLY_TELEGRAM_TOKEN`, `PROCLY_SLACK_WEBHOOK`, `PROCLY_TOKEN`) or from standard input with `--token -` / `--webhook -`, so it stays out of `ps` and the shell history. The flags work as before.
 - `procly ls --json` and `procly describe <name> --json` print machine-readable output: the same objects the panel uses (stable field names, no colors, environment variable names but never values), also with `--server`. `ls --json` prints `[]` when no daemon is running.
 - `procly start` error for a file it cannot run now names the file and a command to pass (`go run`, `java -jar`, or `<command>`), and says `chmod +x` makes it runnable directly. `.mjs`, `.cjs` and executable files already ran; they now have tests.

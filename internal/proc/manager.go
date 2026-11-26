@@ -26,6 +26,8 @@ type Manager struct {
 	runFile string         // where the list of running processes is kept; "" = not kept
 	runMu   sync.Mutex     // serializes writes of that file
 	bg      sync.WaitGroup // background writes of that file, see WaitIdle
+
+	memOnce sync.Once // starts the max_memory sampler, see watchMemory
 }
 
 // OnEvent registers a function to call (in its own goroutine) for crashes,
@@ -44,6 +46,9 @@ func NewManager(logDir string, logger *log.Logger) *Manager {
 func (m *Manager) Start(spec Spec) (Info, error) {
 	if err := spec.Validate(); err != nil {
 		return Info{}, err
+	}
+	if n, _ := spec.maxMemoryBytes(); n > 0 {
+		m.watchMemory()
 	}
 	m.mu.Lock()
 	p, exists := m.procs[spec.Name]

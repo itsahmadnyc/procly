@@ -70,6 +70,7 @@ Start options
       --env-file <path>         Read KEY=value lines from a file on every start, repeatable
       --no-autorestart          Leave the process down when it exits
       --max-restarts <n>        Give up after n quick crashes (default 15)
+      --max-memory <size>       Restart when the process and its children use more (e.g. 500MB)
       --health <url>            http(s)://… or tcp://host:port; restart after 3 failed checks
       --log-max-size <size>     Rotate logs past this size (default 10MB, 0 = off)
       --log-keep <n>            Old log files to keep (default 3)
@@ -211,7 +212,7 @@ func connectOrRecover() (*client.Client, bool) {
 
 func cmdStart(argv []string) error {
 	a, err := parse(argv, withServer(flagSet{
-		valued: set("name", "cwd", "env", "env-file", "max-restarts", "health", "log-max-size", "log-keep"),
+		valued: set("name", "cwd", "env", "env-file", "max-restarts", "max-memory", "health", "log-max-size", "log-keep"),
 		bools:  set("no-autorestart"),
 		alias:  map[string]string{"n": "name", "e": "env"},
 	}))
@@ -369,6 +370,7 @@ func buildSpec(a args) (proc.Spec, error) {
 		}
 		spec.MaxRestarts = n
 	}
+	spec.MaxMemory = a.get("max-memory")
 	spec.Health = a.get("health")
 	spec.LogMaxSize = a.get("log-max-size")
 	if v := a.get("log-keep"); v != "" {
@@ -582,6 +584,9 @@ func cmdDescribe(argv []string) error {
 		if in.HealthErr != "" {
 			rows = append(rows, [2]string{"", "last check: " + in.HealthErr})
 		}
+	}
+	if n, err := proc.ParseSize(in.Spec.MaxMemory); err == nil && in.Spec.MaxMemory != "" && n > 0 {
+		rows = append(rows, [2]string{"max memory", fmtBytes(n) + "  (restarts it above this, with its children)"})
 	}
 	rotation := "off"
 	if max, err := proc.ParseSize(in.Spec.LogMaxSize); err == nil && max > 0 {

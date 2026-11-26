@@ -12,7 +12,7 @@ import (
 )
 
 var startFlags = flagSet{
-	valued: set("name", "cwd", "env", "env-file", "max-restarts"),
+	valued: set("name", "cwd", "env", "env-file", "max-restarts", "max-memory"),
 	bools:  set("no-autorestart"),
 	alias:  map[string]string{"n": "name", "e": "env"},
 }
@@ -246,5 +246,23 @@ func TestBuildSpecEnvFile(t *testing.T) {
 	}
 	if err := s.Validate(); err != nil {
 		t.Errorf("a spec built from the flag must validate: %v", err)
+	}
+}
+
+func TestBuildSpecMaxMemory(t *testing.T) {
+	dir := t.TempDir()
+	s := specFor(t, dir, "server.js", "--max-memory", "500MB")
+	if s.MaxMemory != "500MB" {
+		t.Errorf("MaxMemory = %q", s.MaxMemory)
+	}
+	if err := s.Validate(); err != nil {
+		t.Errorf("a valid limit: %v", err)
+	}
+	a, err := parse([]string{"--cwd", dir, "server.js", "--max-memory", "lots"}, startFlags)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := buildSpec(a); err == nil || !strings.Contains(err.Error(), "max_memory") {
+		t.Errorf("an invalid limit must be refused, naming the setting: %v", err)
 	}
 }

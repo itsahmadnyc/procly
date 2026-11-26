@@ -29,6 +29,10 @@ type Spec struct {
 	RestartDelayMs int        `json:"restart_delay_ms,omitempty" yaml:"restart_delay_ms"`
 	KillTimeoutMs  int        `json:"kill_timeout_ms,omitempty" yaml:"kill_timeout_ms"`
 
+	// MaxMemory ("500MB") restarts the process when it and everything it
+	// started use more than this. Empty or "0" means no limit.
+	MaxMemory string `json:"max_memory,omitempty" yaml:"max_memory"`
+
 	// Log rotation: when a log passes LogMaxSize ("10MB" by default, "0" to
 	// turn it off) it moves to <log>.1 and LogKeep (default 3) old files are kept.
 	LogMaxSize string `json:"log_max_size,omitempty" yaml:"log_max_size"`
@@ -66,6 +70,14 @@ func (l *StringList) UnmarshalYAML(n *yaml.Node) error {
 		return fmt.Errorf("line %d: expected a path or a list of paths", n.Line)
 	}
 	return nil
+}
+
+// maxMemoryBytes is the memory limit in bytes, 0 when there is none.
+func (s Spec) maxMemoryBytes() (int64, error) {
+	if strings.TrimSpace(s.MaxMemory) == "" {
+		return 0, nil
+	}
+	return ParseSize(s.MaxMemory)
 }
 
 func (s Spec) ShouldAutoRestart() bool { return s.AutoRestart == nil || *s.AutoRestart }
@@ -117,6 +129,9 @@ func (s Spec) Validate() error {
 	}
 	if s.MaxRestarts < 0 || s.RestartDelayMs < 0 || s.KillTimeoutMs < 0 || s.HealthRetries < 0 {
 		return errors.New("max_restarts, restart_delay_ms, kill_timeout_ms and health_retries must not be negative")
+	}
+	if _, err := s.maxMemoryBytes(); err != nil {
+		return fmt.Errorf("max_memory: %v", err)
 	}
 	if _, err := ParseSize(s.LogMaxSize); err != nil {
 		return fmt.Errorf("log_max_size: %w", err)

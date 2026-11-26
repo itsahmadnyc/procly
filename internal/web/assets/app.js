@@ -431,13 +431,14 @@ const EVENT = {
   crashed: { ic: "alert", tone: "warn", title: () => "Crashed" },
   errored: { ic: "alert", tone: "bad", title: (e) => e.detail && e.detail.startsWith("gave up") ? "Gave up restarting" : e.detail && e.detail.startsWith("failed to start") ? "Failed to start" : "Exited with an error" },
   unhealthy: { ic: "pulse", tone: "bad", title: () => "Health check failed" },
+  memory: { ic: "alert", tone: "warn", title: () => "Restarted: used too much memory" },
   started: { ic: "play", tone: "good", title: () => "Started" },
   stopped: { ic: "stop", tone: "", title: () => "Stopped" },
   orphaned: { ic: "alert", tone: "warn", title: () => "Found running after its daemon died" },
   exited: { ic: "check", tone: "", title: () => "Exited cleanly" },
 };
 const eventInfo = (e) => EVENT[e.kind] || { ic: "info", tone: "", title: () => e.kind };
-const isProblem = (e) => e.kind === "crashed" || e.kind === "errored" || e.kind === "unhealthy";
+const isProblem = (e) => e.kind === "crashed" || e.kind === "errored" || e.kind === "unhealthy" || e.kind === "memory";
 
 // ---------- menus ----------
 
@@ -1216,6 +1217,7 @@ TAB_PAGES.overview = (srv, name) => {
       add("Directory", p.cwd);
       add("Autorestart", p.autorestart ? `on, gives up after ${p.max_restarts} quick crashes` : "off");
       if (p.health_check) add("Health check", `${p.health || "not running"} · ${p.health_check}`, p.health === "healthy" ? "good" : p.health === "unhealthy" ? "bad" : "");
+      if (p.max_memory) add("Memory limit", `restarts above ${fmtBytes(p.max_memory)}, counting its children`);
       add("Environment", p.env_keys.length ? h("div", { class: "chips" }, p.env_keys.map((k) => h("span", { class: "badge", text: k }))) : h("span", { class: "muted", text: "none set" }));
       add("Logs", p.out_log || "–");
       fill(refs.facts, ...facts.childNodes);

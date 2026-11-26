@@ -196,6 +196,9 @@ func remoteDescribe(server, target string, asJSON bool) error {
 		rows = append(rows, [2]string{"last exit", fmt.Sprint(v.ExitCode)})
 	}
 	rows = append(rows, [2]string{"restarts", fmt.Sprint(v.Restarts)}, [2]string{"autorestart", auto})
+	if v.MaxMemory > 0 {
+		rows = append(rows, [2]string{"max memory", fmtBytes(v.MaxMemory) + "  (restarts it above this, with its children)"})
+	}
 	if len(v.EnvKeys) > 0 {
 		// Agents send variable names only; values stay on that server.
 		rows = append(rows, [2]string{"env", strings.Join(v.EnvKeys, ", ")})
