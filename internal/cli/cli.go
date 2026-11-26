@@ -185,6 +185,7 @@ func startDaemon(c *client.Client, exe string) (*client.Client, error) {
 	}
 	defer logf.Close()
 	cmd := exec.Command(exe, "daemon")
+	cmd.Env = append(os.Environ(), "PROCLY_DAEMON_SPAWNED=1") // so the daemon knows nothing supervises it
 	cmd.Dir = "/"
 	cmd.Stdout, cmd.Stderr = logf, logf
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}

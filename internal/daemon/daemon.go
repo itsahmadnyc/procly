@@ -26,6 +26,8 @@ import (
 
 // Run starts the daemon in the foreground and blocks until it is told to stop.
 func Run(resurrect bool) error {
+	spawnedByCLI = os.Getenv("PROCLY_DAEMON_SPAWNED") != ""
+	os.Unsetenv("PROCLY_DAEMON_SPAWNED")
 	if err := paths.Ensure(); err != nil {
 		return err
 	}
@@ -243,10 +245,20 @@ func plural(n int, one, many string) string {
 	return many
 }
 
+// spawnedByCLI is whether the CLI started this daemon, detached: then nothing
+// supervises it, whatever environment it inherited. The CLI marks the daemons it
+// starts with PROCLY_DAEMON_SPAWNED; a service manager running `procly daemon`
+// from a unit does not. Read once at start, and removed so apps do not see it.
+var spawnedByCLI bool
+
 // supervisor names the service manager that runs this daemon, or "". systemd
-// puts INVOCATION_ID in the environment of everything it starts.
+// puts INVOCATION_ID in the environment of everything it starts, children
+// included, so it only means something for a daemon the CLI did not spawn: one
+// that is a service's own process, which stopping the service would take along
+// with its apps. (A daemon the CLI spawned from inside some service, a CI job
+// for instance, inherits INVOCATION_ID but is not that service's process.)
 func supervisor() string {
-	if os.Getenv("INVOCATION_ID") != "" {
+	if os.Getenv("INVOCATION_ID") != "" && !spawnedByCLI {
 		return "systemd"
 	}
 	return ""

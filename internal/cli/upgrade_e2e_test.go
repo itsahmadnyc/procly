@@ -162,8 +162,13 @@ func TestUpgradeBetweenTwoBuilds(t *testing.T) {
 	copyExe(t, oldBin, installed)
 
 	c := newCLI(t)
+	// Run as a CI job does, inside a systemd service: INVOCATION_ID is in the
+	// environment, and the daemon the CLI starts inherits it. That daemon is not
+	// supervised by systemd, so the upgrade must still hand it over.
+	inService := []string{"INVOCATION_ID=0123456789abcdef"}
+	mirror = append(mirror, inService...)
 	c.file("app.sh", eventsApp)
-	c.okExe(installed, nil, "start", "app.sh", "--name", "web", "--instances", "2")
+	c.okExe(installed, inService, "start", "app.sh", "--name", "web", "--instances", "2")
 	c.okExe(installed, nil, "start", "app.sh", "--name", "api")
 	c.okExe(installed, nil, "start", "app.sh", "--name", "idle")
 	c.okExe(installed, nil, "stop", "idle")
@@ -302,8 +307,17 @@ func TestUpgradeUnderSystemdOnlyReplacesTheBinary(t *testing.T) {
 	copyExe(t, oldBin, installed)
 
 	c := newCLI(t)
-	// systemd puts INVOCATION_ID in the environment of the daemon it starts.
-	c.okExe(installed, []string{"INVOCATION_ID=0123456789abcdef"}, "start", "sleep 60", "--name", "one")
+	// A unit runs `procly daemon` itself, with INVOCATION_ID in the environment;
+	// the CLI is not involved.
+	unit := exec.Command(installed, "daemon")
+	unit.Dir = c.dir
+	unit.Env = append(os.Environ(), "PROCLY_HOME="+c.home, "NO_COLOR=1", "INVOCATION_ID=0123456789abcdef")
+	if err := unit.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { unit.Process.Kill(); unit.Wait() })
+	waitFor(t, "the daemon", func() bool { return c.daemonVersionOf() == "1.0.0" })
+	c.okExe(installed, nil, "start", "sleep 60", "--name", "one")
 	before := c.viewsOf(installed)["one"].PID
 
 	out := c.okExe(installed, mirror, "upgrade")

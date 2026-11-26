@@ -930,3 +930,19 @@ func TestCLIInstancesInAConfigFile(t *testing.T) {
 	contains(t, c.fails("start", "sleep 1", "--name", "x", "--instances", "0"), "--instances must be a number")
 	contains(t, c.fails("start", "sleep 1", "--name", "x", "--instances", "abc"), "--instances must be a number")
 }
+
+// The CLI marks the daemon it spawns (so the daemon knows nothing supervises it);
+// the marker must not reach the apps.
+func TestCLIDaemonMarkerDoesNotReachApps(t *testing.T) {
+	c := newCLI(t)
+	c.file("env.sh", "env > env.txt\nsleep 30\n")
+	c.ok("start", "env.sh", "--name", "envy")
+	f := filepath.Join(c.dir, "env.txt")
+	waitFor(t, "env.txt", func() bool {
+		b, err := os.ReadFile(f)
+		return err == nil && strings.Contains(string(b), "PROCLY_NAME=envy")
+	})
+	if b, _ := os.ReadFile(f); strings.Contains(string(b), "PROCLY_DAEMON_SPAWNED") {
+		t.Errorf("the daemon's marker leaked into an app's environment:\n%s", b)
+	}
+}
