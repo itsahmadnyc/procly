@@ -86,21 +86,22 @@ procly save && procly kill && procly resurrect
 
 Every app restarts once. This is also how to upgrade procly.
 
-## Under systemd and launchd (not tested yet)
+## Under systemd and launchd
 
-These are expectations from the unit files, not observations:
-
-- **systemd.** The unit has `Restart=on-failure` and `RestartSec=2` and no
-  `KillMode`, so systemd's default (`control-group`) applies. When the daemon
-  exits abnormally, systemd should stop whatever is left of the unit, wait two
-  seconds and start `daemon --resurrect`: the apps restart from the last save
-  instead of becoming orphans, with a short outage. If a setup keeps the
-  survivors alive, procly lists them as orphans instead of duplicating them. To
-  be confirmed on a real server ([issue #3](https://github.com/itsahmadnyc/procly/issues/3)).
-- **launchd (macOS).** The plist has `RunAtLoad` but no `KeepAlive`, so a daemon
-  that dies is not restarted by launchd; the next procly command starts one,
-  which finds the survivors. Apps run in their own process groups, which
-  launchd's cleanup should leave alone. Not tested.
+- **systemd (tested).** On Ubuntu 24.04 with the unit `procly startup` writes
+  (`Restart=on-failure`, `RestartSec=2`, no `KillMode`), `kill -9` on the daemon
+  does not leave orphans. systemd's default `KillMode=control-group` stops every
+  process left in the unit, waits two seconds and starts `daemon --resurrect`: the
+  apps come back from the last save with new pids and a short outage, one copy
+  each. `systemctl restart` and `systemctl stop` (which runs `procly kill`) behave
+  the same way and leave nothing running. As always, an app started after the last
+  `procly save` is not in the list that comes back. If a setup keeps the survivors
+  alive (another `KillMode`, or a daemon started by hand), procly lists them as
+  orphans instead of duplicating them.
+- **launchd (macOS, not tested).** The plist has `RunAtLoad` but no `KeepAlive`, so
+  a daemon that dies is not restarted by launchd; the next procly command starts
+  one, which finds the survivors. Apps run in their own process groups, which
+  launchd's cleanup should leave alone.
 
 ## How this was tested
 
@@ -111,6 +112,9 @@ second, and the end-to-end tests run the real binary on Linux and macOS in CI:
 runs after a crash) with the old apps still alive. The scenario was also run by
 hand in a Debian 12 container.
 
-Not covered: systemd and launchd, a real reboot, and the out-of-memory killer
+The systemd behaviour above was observed by hand on an Ubuntu 24.04 server with a
+test unit for an unprivileged user.
+
+Not covered: launchd, a real reboot, and the out-of-memory killer
 itself. It sends SIGKILL, so the daemon's side matches `kill -9`, but it may kill
 an app too.
