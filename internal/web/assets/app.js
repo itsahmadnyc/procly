@@ -10,6 +10,13 @@ const LOG_KEEP = 5000;   // log lines kept in the browser
 
 const $ = (id) => document.getElementById(id);
 
+// Attributes that navigate or load something stay inside the panel: a route
+// (#/...), a path on this server (/...) or a blob: download. Nothing from the
+// server can ever become a javascript: or off-site URL, even if a future
+// change passes it here by mistake. A value that fails is left out.
+const URL_ATTRS = new Set(["href", "src", "action", "formaction", "xlink:href"]);
+const insidePanel = (v) => /^(#|\/(?!\/)|blob:)/.test(String(v));
+
 // h("div", {class, text, onclick, ...attrs}, ...children)
 function h(tag, props, ...kids) {
   const e = document.createElement(tag);
@@ -19,6 +26,7 @@ function h(tag, props, ...kids) {
       if (k === "class") e.className = v;
       else if (k === "text") e.textContent = v;
       else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
+      else if (URL_ATTRS.has(k) && !insidePanel(v)) continue;
       else e.setAttribute(k, v === true ? "" : String(v));
     }
   }
@@ -62,6 +70,7 @@ function morph(from, to) {
     if (from.getAttribute(a.name) === a.value) continue;
     // Inline styles go through CSSOM; the CSP blocks style attributes.
     if (a.name === "style") from.style.cssText = to.style.cssText;
+    else if (URL_ATTRS.has(a.name) && !insidePanel(a.value)) continue;
     else from.setAttribute(a.name, a.value);
   }
   if (from.isEqualNode(to)) return;

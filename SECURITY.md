@@ -20,6 +20,27 @@ release notes if you want it.
   an agent or a network peer start commands or read files it shouldn't.
 - The daemon's unix socket and the files under `~/.procly`.
 
+## Trust model
+
+procly runs commands for you, so a few things work as designed:
+
+- **Signing in to the web panel is the same as having a shell** on the machine
+  that runs it, as the user running procly: the panel can start any command
+  (**New process**). Treat the panel password like a login, and put the panel
+  behind HTTPS if it leaves localhost.
+- **Whoever can use the daemon's unix socket** (`~/.procly`, owner-only) can do
+  the same from the command line.
+- **Agents are narrower.** An agent can list, restart, stop, start, delete and
+  stream logs for processes that already exist. It cannot start a new command.
+- **Working directories and health-check addresses are set by whoever sets up a
+  process.** procly checks their shape (an absolute directory that exists;
+  `http`, `https` or `tcp`), but it does not try to limit where a health check
+  may point.
+
+A report is a vulnerability when it lets someone **without** the panel password,
+the socket or the agent token reach any of this, or when it lets an agent, a
+log line or a process name do more than the above.
+
 ## Supported versions
 
 The latest release. Fixes go into a new release rather than into old ones.
