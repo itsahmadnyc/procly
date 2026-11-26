@@ -116,3 +116,11 @@ func fmtMB(n int64) string {
 	}
 	return fmt.Sprintf("%d MB", n>>20)
 }
+
+// StopWatching ends the max_memory sampler and waits for it, without stopping
+// any process. A handover uses it so this manager restarts nothing while it
+// leaves; StopAll does the same before it stops everything.
+func (m *Manager) StopWatching() {
+	m.memStop.Do(func() { close(m.memDone) })
+	m.memWG.Wait()
+}

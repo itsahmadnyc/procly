@@ -73,6 +73,54 @@ git clone https://github.com/itsahmadnyc/procly && cd procly
 go build -o /usr/local/bin/procly ./cmd/procly
 ```
 
+## Upgrading
+
+```sh
+procly upgrade --check      # is there a newer release?
+procly upgrade              # install it and hand the daemon over
+```
+
+`procly upgrade` downloads the latest release, checks it against the release's
+`checksums.txt` (like `install.sh`), and replaces the binary (with `sudo` when the folder is
+not yours, as `install.sh` does; the old one is kept as `procly.old` until the end). Then it
+hands the daemon over to the new binary:
+
+- The running daemon passes its list on and exits **without stopping your apps**.
+- A daemon from the new binary starts, and **every running app is restarted once, one at a
+  time**: the app is stopped where it is and started again from its settings, and the next one
+  is not touched until it is up (until it passes its health check, if it has one; at most a
+  minute). The instances of a group roll, so the others keep serving.
+- **Stopped apps stay stopped**, still in the list, and **your saved list is not changed**
+  (`procly save` is for you to decide).
+- Between the old daemon leaving and an app's turn, that app keeps running but nothing
+  restarts it if it crashes; that window is as long as the apps before it take.
+
+Why apps restart at all: a new daemon can list and stop the apps an old one left behind
+(see [what happens when the daemon dies](docs/daemon-failure.md)) but cannot yet supervise
+them, so each app is restarted under it instead. A handover that keeps them running is on
+the roadmap.
+
+If the new daemon does not start, procly puts the old binary back and restarts the apps
+under it. If the command is interrupted after the old daemon left, run `procly upgrade`
+again: it finishes the restarts from `~/.procly/upgrade.json`, skipping the apps already done.
+`procly upgrade --dry-run` shows the plan and changes nothing; `--no-restart` only replaces the
+binary (the daemon and the apps keep running the old version; run `procly upgrade` again later
+to hand over); `--version 0.4.0` installs that version, also an older one.
+
+Two cases do less, on purpose:
+
+- **A daemon run by systemd** (from `procly startup`) is not handed over: stopping the service
+  would stop the apps with it. The binary is replaced and the command prints what to run:
+  `procly save && sudo systemctl restart procly`, which restarts every app together from the
+  saved list.
+- **Homebrew and npm** own their binaries: `procly upgrade` says to use `brew upgrade procly`
+  or `npm update -g procly`, and `procly upgrade --check` still works.
+
+Apps that run `procly web` or `procly agent` outside procly keep the old code until you
+restart them. Downloads come from GitHub; set `PROCLY_DOWNLOAD_BASE` to a mirror, as for
+`install.sh`. The first release with `upgrade` is 0.4.0; to get there from an older one, run
+`install.sh` and then `procly save && procly kill && procly resurrect`.
+
 ## Quick start
 
 ```sh

@@ -18,8 +18,9 @@ import (
 type Client struct{ hc *http.Client }
 
 type Ping struct {
-	Version string `json:"version"`
-	PID     int    `json:"pid"`
+	Version    string `json:"version"`
+	PID        int    `json:"pid"`
+	Supervisor string `json:"supervisor,omitempty"` // "systemd" when a service manager runs the daemon
 }
 
 type APIError struct {
@@ -65,6 +66,21 @@ func (c *Client) Start(spec proc.Spec) (proc.Info, error) {
 
 func (c *Client) Stop(target string) ([]proc.Info, error) {
 	return c.many(http.MethodPost, "/v1/processes/"+url.PathEscape(target)+"/stop")
+}
+
+// Handover asks the daemon for the list of processes to pass on and to exit
+// without stopping them. The daemon is gone a moment after this returns.
+func (c *Client) Handover() ([]proc.HandoverEntry, error) {
+	var out []proc.HandoverEntry
+	err := c.call(context.Background(), http.MethodPost, "/v1/handover", nil, &out)
+	return out, err
+}
+
+// Add registers a process without starting it.
+func (c *Client) Add(spec proc.Spec) (proc.Info, error) {
+	var out proc.Info
+	err := c.call(context.Background(), http.MethodPost, "/v1/add", spec, &out)
+	return out, err
 }
 
 func (c *Client) Reload(target string) ([]proc.Info, error) {

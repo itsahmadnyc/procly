@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -13,6 +14,7 @@ import (
 	"os/signal"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -54,7 +56,11 @@ func Run(resurrect bool) error {
 	quit := make(chan struct{})
 	var once sync.Once
 	shutdown := func() { once.Do(func() { close(quit) }) }
-	srv := &http.Server{Handler: newHandler(mgr, shutdown), ReadHeaderTimeout: 10 * time.Second}
+	// A handover ends the daemon but leaves the processes running, for the new
+	// daemon (an upgrade) to take over.
+	var handedOver atomic.Bool
+	detach := func() { handedOver.Store(true); shutdown() }
+	srv := &http.Server{Handler: newHandler(mgr, shutdown, detach), ReadHeaderTimeout: 10 * time.Second}
 
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
@@ -78,10 +84,17 @@ func Run(resurrect bool) error {
 			logger.Printf("received %s", s)
 		case <-quit:
 		}
-		logger.Printf("shutting down")
-		mgr.StopAll()
-		mgr.WaitIdle()     // a late background write must not undo the next line
-		mgr.FlushRunning() // nothing is left running, so this removes the file
+		if handedOver.Load() {
+			logger.Printf("handing over to a new daemon: leaving the processes running")
+			mgr.StopWatching() // no restarts from here on; the new daemon decides
+			mgr.WaitIdle()
+			mgr.FlushRunning() // the new daemon finds the processes through this file
+		} else {
+			logger.Printf("shutting down")
+			mgr.StopAll()
+			mgr.WaitIdle()     // a late background write must not undo the next line
+			mgr.FlushRunning() // nothing is left running, so this removes the file
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_ = srv.Shutdown(ctx)
@@ -126,11 +139,11 @@ func rotateLoop(quit <-chan struct{}, m *proc.Manager, logger *log.Logger) {
 	}
 }
 
-func newHandler(m *proc.Manager, shutdown func()) http.Handler {
+func newHandler(m *proc.Manager, shutdown, detach func()) http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /v1/ping", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]any{"version": version.Version, "pid": os.Getpid()})
+		writeJSON(w, http.StatusOK, map[string]any{"version": version.Version, "pid": os.Getpid(), "supervisor": supervisor()})
 	})
 	mux.HandleFunc("GET /v1/processes", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, m.List())
@@ -176,6 +189,23 @@ func newHandler(m *proc.Manager, shutdown func()) http.Handler {
 		infos, err := m.Resurrect(paths.DumpFile())
 		respond(w, infos, err)
 	})
+	mux.HandleFunc("POST /v1/handover", func(w http.ResponseWriter, r *http.Request) {
+		if sup := supervisor(); sup != "" {
+			writeError(w, fmt.Errorf("this daemon is run by %s, which would stop the processes along with it: restart the service instead", sup))
+			return
+		}
+		writeJSON(w, http.StatusOK, m.Handover())
+		detach()
+	})
+	mux.HandleFunc("POST /v1/add", func(w http.ResponseWriter, r *http.Request) {
+		var spec proc.Spec
+		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&spec); err != nil {
+			writeError(w, fmt.Errorf("invalid spec: %w", err))
+			return
+		}
+		info, err := m.Add(spec)
+		respond(w, info, err)
+	})
 	mux.HandleFunc("POST /v1/kill", func(w http.ResponseWriter, r *http.Request) {
 		infos := m.StopAll()
 		writeJSON(w, http.StatusOK, infos)
@@ -211,4 +241,13 @@ func plural(n int, one, many string) string {
 		return one
 	}
 	return many
+}
+
+// supervisor names the service manager that runs this daemon, or "". systemd
+// puts INVOCATION_ID in the environment of everything it starts.
+func supervisor() string {
+	if os.Getenv("INVOCATION_ID") != "" {
+		return "systemd"
+	}
+	return ""
 }
