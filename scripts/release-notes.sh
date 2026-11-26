@@ -45,7 +45,13 @@ cat <<'FOOTER'
 curl -fsSL https://raw.githubusercontent.com/itsahmadnyc/procly/main/install.sh | sh
 ```
 
-Upgrading: run the same command, then restart the daemon so it runs the new version. Your processes restart once. Update the agent on each connected server the same way.
+Upgrading: from 0.4.0 on, `procly upgrade` installs the latest release and restarts your apps once each, one at a time (`procly upgrade --check` only looks). Update the agent on each connected server the same way.
+
+```sh
+procly upgrade
+```
+
+From an older version, run the install command (or `brew upgrade procly`, `npm update -g procly`), then restart the daemon so it runs the new version; your processes restart once, all together:
 
 ```sh
 procly save && procly kill && procly resurrect
