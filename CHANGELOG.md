@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## v0.2.0
+
+Keeps servers tidy and tells you when something goes wrong.
 
 - Log rotation: logs rotate at 10 MB and keep 3 old files by default
   (`--log-max-size`, `--log-keep`, `log_max_size`, `log_keep`), without
