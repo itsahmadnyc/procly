@@ -307,12 +307,12 @@ func TestProcessesAndActions(t *testing.T) {
 		t.Fatalf("processes: %d %s", r.code, r.body)
 	}
 
-	for _, verb := range []string{"restart", "stop", "start", "delete"} {
+	for _, verb := range []string{"restart", "reload", "stop", "start", "delete"} {
 		if r := p.req(http.MethodPost, "/api/servers/local/processes/api/"+verb, "", true); r.code != http.StatusOK {
 			t.Errorf("%s: %d %s", verb, r.code, r.body)
 		}
 	}
-	if got := strings.Join(p.backend.recorded(), ","); got != "restart api,stop api,start api,delete api" {
+	if got := strings.Join(p.backend.recorded(), ","); got != "restart api,reload api,stop api,start api,delete api" {
 		t.Fatalf("backend saw %q", got)
 	}
 

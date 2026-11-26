@@ -27,7 +27,10 @@ type Manager struct {
 	runMu   sync.Mutex     // serializes writes of that file
 	bg      sync.WaitGroup // background writes of that file, see WaitIdle
 
-	memOnce sync.Once // starts the max_memory sampler, see watchMemory
+	memOnce sync.Once      // starts the max_memory sampler, see watchMemory
+	memStop sync.Once      // stops it, see StopAll
+	memDone chan struct{}  // closed to stop it
+	memWG   sync.WaitGroup // the sampler, so StopAll can wait for it
 }
 
 // OnEvent registers a function to call (in its own goroutine) for crashes,
@@ -39,7 +42,7 @@ func (m *Manager) OnEvent(fn func(Event)) {
 }
 
 func NewManager(logDir string, logger *log.Logger) *Manager {
-	return &Manager{procs: map[string]*Process{}, logDir: logDir, logger: logger}
+	return &Manager{procs: map[string]*Process{}, logDir: logDir, logger: logger, memDone: make(chan struct{})}
 }
 
 // Start launches a new process, or starts an existing stopped one with a new spec.
@@ -107,6 +110,34 @@ func (m *Manager) Stop(target string) ([]Info, error) {
 	return infosOf(ps), nil
 }
 
+// Reload sends the reload signal. For "all" it reaches every running process
+// that has one and fails only when none does; naming a process that has none fails.
+func (m *Manager) Reload(target string) ([]Info, error) {
+	ps, err := m.resolve(target)
+	if err != nil {
+		return nil, err
+	}
+	if target != "all" {
+		err = each(ps, (*Process).Reload)
+		return infosOf(ps), err
+	}
+	var some []*Process
+	for _, p := range ps {
+		p.mu.Lock()
+		_, has := p.spec.reloadSignal()
+		up := p.cmd != nil
+		p.mu.Unlock()
+		if has && up {
+			some = append(some, p)
+		}
+	}
+	if len(some) == 0 {
+		return nil, errors.New("no running process has a reload_signal; set one (for example reload_signal: SIGHUP) or use restart")
+	}
+	err = each(some, (*Process).Reload)
+	return infosOf(some), err
+}
+
 func (m *Manager) Restart(target string) ([]Info, error) {
 	ps, err := m.resolve(target)
 	if err != nil {
@@ -134,6 +165,10 @@ func (m *Manager) Delete(target string) ([]Info, error) {
 }
 
 func (m *Manager) StopAll() []Info {
+	// The memory sampler goes first, and StopAll waits for it, so a restart it
+	// was in the middle of cannot bring a process back after this returns.
+	m.memStop.Do(func() { close(m.memDone) })
+	m.memWG.Wait()
 	infos, _ := m.Stop("all")
 	return infos
 }

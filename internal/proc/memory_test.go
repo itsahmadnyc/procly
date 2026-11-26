@@ -156,3 +156,29 @@ func TestViewShowsTheMemoryLimit(t *testing.T) {
 		t.Errorf("no limit should be 0 in the view, got %d", got)
 	}
 }
+
+// A process that keeps going over its limit is restarted again and again. When
+// the manager is stopped, nothing may come back afterwards.
+func TestStopAllLeavesNothingToTheMemorySampler(t *testing.T) {
+	fastMemoryChecks(t)
+	m, _ := newTestManager(t)
+	got := make(chan Event, 16)
+	m.OnEvent(func(e Event) { got <- e })
+	s := spec(t, "loop", growBy(t, 120))
+	s.MaxMemory = "60MB"
+	if _, err := m.Start(s); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-got:
+	case <-time.After(15 * time.Second):
+		t.Fatal("no memory restart to interrupt")
+	}
+	m.StopAll()
+	time.Sleep(600 * time.Millisecond) // several sampler ticks
+	for _, in := range m.List() {
+		if in.PID != 0 || in.Status == StatusOnline || in.Status == StatusWaiting {
+			t.Errorf("%s is running again after StopAll: pid %d, %s", in.Name, in.PID, in.Status)
+		}
+	}
+}

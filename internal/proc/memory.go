@@ -10,12 +10,21 @@ import (
 var memoryCheckEvery = 5 * time.Second
 
 // watchMemory starts the sampler the first time a process with a limit runs.
-// It lives as long as the daemon; with no limits it only wakes up to find nothing to do.
+// It runs until StopAll; with no limits it only wakes up to find nothing to do.
 func (m *Manager) watchMemory() {
 	m.memOnce.Do(func() {
+		m.memWG.Add(1)
 		go func() {
-			for range time.Tick(memoryCheckEvery) {
-				m.checkMemory()
+			defer m.memWG.Done()
+			t := time.NewTicker(memoryCheckEvery)
+			defer t.Stop()
+			for {
+				select {
+				case <-m.memDone:
+					return
+				case <-t.C:
+					m.checkMemory()
+				}
 			}
 		}()
 	})
@@ -68,7 +77,8 @@ func (p *Process) restartForMemory(pid int, used, limit int64) {
 	p.mu.Unlock()
 	p.logger.Printf("%s: %s, restarting", p.spec.Name, ev.Detail)
 	p.emit(ev)
-	go func() { _ = p.Restart() }()
+	// Not in a goroutine of its own: the sampler waits for it, and StopAll waits for the sampler.
+	_ = p.Restart()
 }
 
 func fmtMB(n int64) string {

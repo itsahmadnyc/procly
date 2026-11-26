@@ -9,8 +9,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -563,4 +565,67 @@ func TestCLISecretsWithoutTheCommandLine(t *testing.T) {
 	if code == 0 || !strings.Contains(out, "https") {
 		t.Errorf("a webhook read from stdin is still checked: exit %d\n%s", code, out)
 	}
+}
+
+func TestCLIReloadAndSignals(t *testing.T) {
+	c := newCLI(t)
+	c.file("server.sh", "trap 'echo reloaded >> signals.txt' HUP\ntrap 'echo stopped-by-int >> signals.txt; exit 0' INT\ntrap 'echo stopped-by-term >> signals.txt; exit 0' TERM\nwhile true; do sleep 0.1; done\n")
+	c.file("procly.yml", "apps:\n  - name: web\n    command: bash server.sh\n    reload_signal: SIGHUP\n    stop_signal: SIGINT\n  - name: plain\n    command: sleep 30\n")
+	c.ok("start", "procly.yml")
+	time.Sleep(500 * time.Millisecond)
+	seen := filepath.Join(c.dir, "signals.txt")
+	fileHas := func(want ...string) bool {
+		b, _ := os.ReadFile(seen)
+		return strings.Join(strings.Fields(string(b)), ",") == strings.Join(want, ",")
+	}
+
+	out := c.ok("reload", "web")
+	contains(t, out, "reloaded web")
+	waitFor(t, "the reload to arrive", func() bool { return fileHas("reloaded") })
+
+	// The process kept running, and nothing counted as a restart.
+	out = c.ok("ls")
+	if r := row(out, "web"); !strings.Contains(r, "online") || strings.Fields(r)[6] != "0" {
+		t.Errorf("web after a reload: %q", r)
+	}
+	contains(t, c.ok("describe", "web"), "reload signal", "SIGHUP", "stop signal", "SIGINT")
+	var v struct {
+		Stop   string `json:"stop_signal"`
+		Reload string `json:"reload_signal"`
+	}
+	if err := json.Unmarshal([]byte(c.ok("describe", "web", "--json")), &v); err != nil || v.Stop != "SIGINT" || v.Reload != "SIGHUP" {
+		t.Errorf("describe --json: %+v (%v)", v, err)
+	}
+
+	// Without a reload_signal it says what to do; "all" skips the ones that cannot.
+	contains(t, c.fails("reload", "plain"), "no reload_signal", "plain")
+	contains(t, c.ok("reload", "all"), "reloaded web")
+	waitFor(t, "the second reload", func() bool { return fileHas("reloaded", "reloaded") })
+
+	// stop uses the configured signal.
+	c.ok("stop", "web")
+	waitFor(t, "stop_signal to arrive", func() bool { return fileHas("reloaded", "reloaded", "stopped-by-int") })
+
+	// Managed processes get the default SIGHUP, not an ignored one (the daemon
+	// catches it instead of ignoring it), and the daemon itself survives a hangup.
+	b, err := os.ReadFile(filepath.Join(c.home, "daemon.pid"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dpid, _ := strconv.Atoi(strings.TrimSpace(string(b)))
+	if err := syscall.Kill(dpid, syscall.SIGHUP); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(300 * time.Millisecond)
+	if !alive(dpid) {
+		t.Error("the daemon must survive SIGHUP (a closing terminal)")
+	}
+	contains(t, c.ok("ls"), "plain")
+
+	// A bad name is refused at start, naming the setting.
+	c.file("bad.yml", "apps:\n  - name: bad\n    command: sleep 1\n    reload_signal: SIGNOPE\n")
+	contains(t, c.fails("start", "bad.yml"), "reload_signal", "SIGNOPE")
+	// And the flags work.
+	c.ok("start", "sleep 31", "--name", "flagged", "--reload-signal", "usr1", "--stop-signal", "HUP")
+	contains(t, c.ok("describe", "flagged"), "SIGUSR1", "SIGHUP")
 }

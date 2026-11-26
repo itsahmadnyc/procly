@@ -67,6 +67,10 @@ func (c *Client) Stop(target string) ([]proc.Info, error) {
 	return c.many(http.MethodPost, "/v1/processes/"+url.PathEscape(target)+"/stop")
 }
 
+func (c *Client) Reload(target string) ([]proc.Info, error) {
+	return c.many(http.MethodPost, "/v1/processes/"+url.PathEscape(target)+"/reload")
+}
+
 func (c *Client) Restart(target string) ([]proc.Info, error) {
 	return c.many(http.MethodPost, "/v1/processes/"+url.PathEscape(target)+"/restart")
 }

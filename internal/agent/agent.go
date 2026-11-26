@@ -190,6 +190,8 @@ func (a *agent) action(w http.ResponseWriter, r *http.Request) {
 		_, err = a.c.Restart(name)
 	case "stop":
 		_, err = a.c.Stop(name)
+	case "reload":
+		_, err = a.c.Reload(name)
 	case "delete":
 		_, err = a.c.Delete(name)
 	default:

@@ -35,6 +35,7 @@ Processes
   start <file|command|config>   Start a process, or every app in a config file
   stop <name|id|all>            Stop processes
   restart <name|id|all>         Restart processes
+  reload <name|id|all>          Send the reload signal (reload_signal), no restart
   delete <name|id|all>          Stop and forget processes          alias: rm
   list [--json]                 Show all processes                 alias: ls
   describe <name|id> [--json]   Details for one process            alias: show
@@ -70,6 +71,8 @@ Start options
       --env-file <path>         Read KEY=value lines from a file on every start, repeatable
       --no-autorestart          Leave the process down when it exits
       --max-restarts <n>        Give up after n quick crashes (default 15)
+      --stop-signal <sig>       Signal that stops it (default SIGTERM, then SIGKILL after the timeout)
+      --reload-signal <sig>     Signal for procly reload, e.g. SIGHUP
       --max-memory <size>       Restart when the process and its children use more (e.g. 500MB)
       --health <url>            http(s)://… or tcp://host:port; restart after 3 failed checks
       --log-max-size <size>     Rotate logs past this size (default 10MB, 0 = off)
@@ -104,7 +107,7 @@ func Run(argv []string) int {
 	switch cmd {
 	case "start":
 		err = cmdStart(rest)
-	case "stop", "restart", "delete", "rm", "del":
+	case "stop", "restart", "reload", "delete", "rm", "del":
 		err = cmdAction(cmd, rest)
 	case "list", "ls", "l", "status":
 		err = cmdList(rest)
@@ -212,7 +215,7 @@ func connectOrRecover() (*client.Client, bool) {
 
 func cmdStart(argv []string) error {
 	a, err := parse(argv, withServer(flagSet{
-		valued: set("name", "cwd", "env", "env-file", "max-restarts", "max-memory", "health", "log-max-size", "log-keep"),
+		valued: set("name", "cwd", "env", "env-file", "max-restarts", "max-memory", "stop-signal", "reload-signal", "health", "log-max-size", "log-keep"),
 		bools:  set("no-autorestart"),
 		alias:  map[string]string{"n": "name", "e": "env"},
 	}))
@@ -371,6 +374,8 @@ func buildSpec(a args) (proc.Spec, error) {
 		spec.MaxRestarts = n
 	}
 	spec.MaxMemory = a.get("max-memory")
+	spec.StopSignal = a.get("stop-signal")
+	spec.ReloadSignal = a.get("reload-signal")
 	spec.Health = a.get("health")
 	spec.LogMaxSize = a.get("log-max-size")
 	if v := a.get("log-keep"); v != "" {
@@ -457,6 +462,9 @@ func cmdAction(action string, argv []string) error {
 		case "restart":
 			infos, err = c.Restart(target)
 			verb = "restarted"
+		case "reload":
+			infos, err = c.Reload(target)
+			verb = "reloaded"
 		default:
 			infos, err = c.Delete(target)
 			verb = "deleted"
@@ -584,6 +592,12 @@ func cmdDescribe(argv []string) error {
 		if in.HealthErr != "" {
 			rows = append(rows, [2]string{"", "last check: " + in.HealthErr})
 		}
+	}
+	if in.Spec.StopSignal != "" {
+		rows = append(rows, [2]string{"stop signal", proc.SignalName(in.Spec.StopSignal) + ", then SIGKILL after the kill timeout"})
+	}
+	if in.Spec.ReloadSignal != "" {
+		rows = append(rows, [2]string{"reload signal", proc.SignalName(in.Spec.ReloadSignal) + "  (procly reload " + in.Name + ")"})
 	}
 	if n, err := proc.ParseSize(in.Spec.MaxMemory); err == nil && in.Spec.MaxMemory != "" && n > 0 {
 		rows = append(rows, [2]string{"max memory", fmtBytes(n) + "  (restarts it above this, with its children)"})

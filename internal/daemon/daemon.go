@@ -58,7 +58,16 @@ func Run(resurrect bool) error {
 
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
-	signal.Ignore(syscall.SIGHUP)
+	// Survive the terminal closing, but catch SIGHUP instead of ignoring it: an
+	// ignored signal stays ignored in every process started from here, which
+	// would make reload_signal: SIGHUP do nothing for shells and anything else
+	// that keeps what it inherits. A caught signal is reset to the default in a child.
+	hup := make(chan os.Signal, 1)
+	signal.Notify(hup, syscall.SIGHUP)
+	go func() {
+		for range hup {
+		}
+	}()
 
 	done := make(chan struct{})
 	go rotateLoop(quit, mgr, logger)
@@ -149,6 +158,10 @@ func newHandler(m *proc.Manager, shutdown func()) http.Handler {
 	})
 	mux.HandleFunc("POST /v1/processes/{name}/restart", func(w http.ResponseWriter, r *http.Request) {
 		infos, err := m.Restart(r.PathValue("name"))
+		respond(w, infos, err)
+	})
+	mux.HandleFunc("POST /v1/processes/{name}/reload", func(w http.ResponseWriter, r *http.Request) {
+		infos, err := m.Reload(r.PathValue("name"))
 		respond(w, infos, err)
 	})
 	mux.HandleFunc("DELETE /v1/processes/{name}", func(w http.ResponseWriter, r *http.Request) {
