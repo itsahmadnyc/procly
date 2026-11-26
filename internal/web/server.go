@@ -363,7 +363,7 @@ func (s *server) action(w http.ResponseWriter, r *http.Request, b backend, serve
 		return
 	}
 	switch verb {
-	case "restart", "start", "stop", "delete":
+	case "restart", "start", "stop", "reload", "delete":
 	default:
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown action"})
 		return

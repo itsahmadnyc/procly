@@ -29,6 +29,12 @@ type Spec struct {
 	RestartDelayMs int        `json:"restart_delay_ms,omitempty" yaml:"restart_delay_ms"`
 	KillTimeoutMs  int        `json:"kill_timeout_ms,omitempty" yaml:"kill_timeout_ms"`
 
+	// StopSignal is sent first when stopping (default SIGTERM), then SIGKILL after
+	// KillTimeoutMs. ReloadSignal is what `procly reload` sends; empty means the
+	// process cannot be reloaded.
+	StopSignal   string `json:"stop_signal,omitempty" yaml:"stop_signal"`
+	ReloadSignal string `json:"reload_signal,omitempty" yaml:"reload_signal"`
+
 	// MaxMemory ("500MB") restarts the process when it and everything it
 	// started use more than this. Empty or "0" means no limit.
 	MaxMemory string `json:"max_memory,omitempty" yaml:"max_memory"`
@@ -129,6 +135,9 @@ func (s Spec) Validate() error {
 	}
 	if s.MaxRestarts < 0 || s.RestartDelayMs < 0 || s.KillTimeoutMs < 0 || s.HealthRetries < 0 {
 		return errors.New("max_restarts, restart_delay_ms, kill_timeout_ms and health_retries must not be negative")
+	}
+	if err := s.validateSignals(); err != nil {
+		return err
 	}
 	if _, err := s.maxMemoryBytes(); err != nil {
 		return fmt.Errorf("max_memory: %v", err)

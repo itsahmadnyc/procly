@@ -115,7 +115,7 @@ func remoteAction(server, action string, targets []string) error {
 	if err != nil {
 		return err
 	}
-	verb := map[string]string{"stop": "stop", "restart": "restart"}[action]
+	verb := map[string]string{"stop": "stop", "restart": "restart", "reload": "reload"}[action]
 	if verb == "" {
 		verb = "delete"
 	}
@@ -128,6 +128,9 @@ func remoteAction(server, action string, targets []string) error {
 	for _, t := range targets {
 		if t == "all" {
 			for _, v := range views {
+				if verb == "reload" && v.ReloadSignal == "" {
+					continue // "all" reloads the ones that can be reloaded
+				}
 				names = append(names, v.Name)
 			}
 			continue
@@ -139,7 +142,7 @@ func remoteAction(server, action string, targets []string) error {
 		names = append(names, v.Name)
 	}
 
-	past := map[string]string{"stop": "stopped", "restart": "restarted", "delete": "deleted"}[verb]
+	past := map[string]string{"stop": "stopped", "restart": "restarted", "reload": "reloaded", "delete": "deleted"}[verb]
 	var errs []error
 	for _, name := range names {
 		ctx, cancel := shortCtx()
@@ -196,6 +199,12 @@ func remoteDescribe(server, target string, asJSON bool) error {
 		rows = append(rows, [2]string{"last exit", fmt.Sprint(v.ExitCode)})
 	}
 	rows = append(rows, [2]string{"restarts", fmt.Sprint(v.Restarts)}, [2]string{"autorestart", auto})
+	if v.StopSignal != "" {
+		rows = append(rows, [2]string{"stop signal", v.StopSignal + ", then SIGKILL after the kill timeout"})
+	}
+	if v.ReloadSignal != "" {
+		rows = append(rows, [2]string{"reload signal", v.ReloadSignal + "  (procly reload " + v.Name + " -S " + server + ")"})
+	}
 	if v.MaxMemory > 0 {
 		rows = append(rows, [2]string{"max memory", fmtBytes(v.MaxMemory) + "  (restarts it above this, with its children)"})
 	}

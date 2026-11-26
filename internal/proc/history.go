@@ -15,6 +15,8 @@ const (
 	HistoryStarted = "started"
 	HistoryStopped = "stopped"
 	HistoryExited  = "exited" // finished on its own with autorestart off
+	// HistoryReloaded: procly reload sent the reload signal; the process kept running.
+	HistoryReloaded = "reloaded"
 	// HistoryOrphaned: a new daemon found the process still running after the
 	// daemon that started it died.
 	HistoryOrphaned = "orphaned"

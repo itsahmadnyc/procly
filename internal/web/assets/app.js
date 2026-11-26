@@ -274,8 +274,8 @@ const running = (p) => p.status === "online" || p.status === "waiting" || p.stat
 const needsAttention = (p) => p.status === "errored" || p.status === "waiting" || p.status === "orphaned" || p.health === "unhealthy";
 const canRestart = (p) => p.status !== "orphaned";
 
-const progressive = { restart: "restarting", start: "starting", stop: "stopping", delete: "deleting" };
-const past = { restart: "Restarted", start: "Started", stop: "Stopped", delete: "Deleted" };
+const progressive = { restart: "restarting", reload: "reloading", start: "starting", stop: "stopping", delete: "deleting" };
+const past = { restart: "Restarted", reload: "Reloaded", start: "Started", stop: "Stopped", delete: "Deleted" };
 
 // ---------- small components ----------
 
@@ -432,6 +432,7 @@ const EVENT = {
   errored: { ic: "alert", tone: "bad", title: (e) => e.detail && e.detail.startsWith("gave up") ? "Gave up restarting" : e.detail && e.detail.startsWith("failed to start") ? "Failed to start" : "Exited with an error" },
   unhealthy: { ic: "pulse", tone: "bad", title: () => "Health check failed" },
   memory: { ic: "alert", tone: "warn", title: () => "Restarted: used too much memory" },
+  reloaded: { ic: "restart", tone: "good", title: () => "Reloaded" },
   started: { ic: "play", tone: "good", title: () => "Started" },
   stopped: { ic: "stop", tone: "", title: () => "Stopped" },
   orphaned: { ic: "alert", tone: "warn", title: () => "Found running after its daemon died" },
@@ -1071,6 +1072,7 @@ function procMenu(server, p) {
   const busy = S.busy.has(key(server, p.name));
   return [
     { label: "Restart", icon: "restart", disabled: busy || !canRestart(p), onclick: () => act(server, p.name, "restart") },
+    p.reload_signal && p.status === "online" && { label: "Reload", icon: "pulse", disabled: busy, onclick: () => act(server, p.name, "reload") },
     { label: running(p) ? "Stop" : "Start", icon: running(p) ? "stop" : "play", disabled: busy, onclick: () => act(server, p.name, toggleVerb(p)) },
     "sep",
     { label: "Logs", icon: "terminal", onclick: () => go(base + "/logs") },
@@ -1078,7 +1080,7 @@ function procMenu(server, p) {
     { label: "Configuration", icon: "config", onclick: () => go(base + "/config") },
     "sep",
     { label: "Delete", icon: "trash", danger: true, disabled: busy, onclick: () => act(server, p.name, "delete") },
-  ];
+  ].filter(Boolean);
 }
 
 // ----- one process -----
@@ -1155,6 +1157,7 @@ PAGES.process = () => {
       refs.sub.classList.add("mono");
       fill(refs.actions, 
         h("button", { class: "btn", disabled: busy || !canRestart(p), title: canRestart(p) ? null : "Not supervised: stop it first", onclick: () => act(srv(), name(), "restart") }, icon("restart"), "Restart", h("kbd", { text: "r" })),
+        p.reload_signal && p.status === "online" && h("button", { class: "btn", disabled: busy, title: `Sends ${p.reload_signal}; the process keeps running`, onclick: () => act(srv(), name(), "reload") }, icon("pulse"), "Reload"),
         h("button", { class: "btn", disabled: busy, onclick: () => toggle(srv(), name()) }, icon(running(p) ? "stop" : "play"), running(p) ? "Stop" : "Start", h("kbd", { text: "s" })),
         h("button", { class: "btn ghost danger", disabled: busy, onclick: () => act(srv(), name(), "delete") }, icon("trash"), "Delete"));
 
@@ -1269,7 +1272,8 @@ TAB_PAGES.config = () => {
           ["Gives up after", `${p.max_restarts} crashes in a row`],
           ["Retry delay", `${fmtDur(p.restart_delay_ms)}, doubling up to 30s`],
           ["Counter resets", "after a run longer than 30s"],
-          ["Stop", `SIGTERM, then SIGKILL after ${fmtDur(p.kill_timeout_ms)}`],
+          ["Stop", `${p.stop_signal || "SIGTERM"}, then SIGKILL after ${fmtDur(p.kill_timeout_ms)}`],
+          ["Reload", p.reload_signal ? `${p.reload_signal} (procly reload ${p.name})` : "not set: restart is the only way"],
         ]),
         card("config", "Logs", [
           ["stdout", p.out_log || "–"], ["stderr", p.err_log || "–"],

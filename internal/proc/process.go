@@ -301,10 +301,10 @@ func (p *Process) Stop() {
 		return
 	}
 	p.stopping = true
-	pid, exited, timeout, name := p.pid, p.exited, p.spec.killTimeout(), p.spec.Name
+	pid, exited, timeout, name, sig := p.pid, p.exited, p.spec.killTimeout(), p.spec.Name, p.spec.stopSignal()
 	p.mu.Unlock()
 
-	_ = syscall.Kill(-pid, syscall.SIGTERM)
+	_ = syscall.Kill(-pid, sig)
 	select {
 	case <-exited:
 	case <-time.After(timeout):

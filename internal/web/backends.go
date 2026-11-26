@@ -49,6 +49,8 @@ func (l localBackend) Action(_ context.Context, name, verb string) error {
 		_, err = l.c.Restart(name)
 	case "stop":
 		_, err = l.c.Stop(name)
+	case "reload":
+		_, err = l.c.Reload(name)
 	case "delete":
 		_, err = l.c.Delete(name)
 	}
