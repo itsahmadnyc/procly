@@ -77,6 +77,12 @@ left behind) and stop them before you resurrect.
   gone after a reboot, so run `procly save` after you add or remove apps.
 - An app that was **stopped** when you saved starts again after the reboot.
   `resurrect` starts every saved entry.
+- Tested in an Ubuntu 24.04 VM (arm64), installed with `install.sh` and
+  `procly startup`: after a clean reboot and after a power cut with no shutdown,
+  the unit started by itself and brought back the saved apps with their working
+  directory and environment. `procly logs` and `procly web` worked afterwards,
+  and the stale `running.json` of the power cut did not make the new daemon see
+  orphans (the boot id in the process fingerprint differs after a boot).
 
 ## Restarting the daemon on purpose
 
@@ -115,6 +121,7 @@ hand in a Debian 12 container.
 The systemd behaviour above was observed by hand on an Ubuntu 24.04 server with a
 test unit for an unprivileged user.
 
-Not covered: launchd, a real reboot, and the out-of-memory killer
+Not covered: launchd, a reboot of a physical or cloud server (the reboots above
+were a VM's), and the out-of-memory killer
 itself. It sends SIGKILL, so the daemon's side matches `kill -9`, but it may kill
 an app too.
