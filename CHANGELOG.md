@@ -1,0 +1,49 @@
+# Changelog
+
+## v0.1.0 — first release
+
+procly is a process manager for your servers: one small Go binary that runs
+Node, Python, Go or any other command, restarts it when it crashes, keeps its
+logs, and brings everything back after a reboot.
+
+### Run processes
+
+- `procly start` takes a file (`server.js`, `worker.py`, `job.sh`), any command
+  (`"npm run start"`, `"PORT=3000 node app.js"`) or a `procly.yml` with many apps.
+- Crashes restart with exponential backoff (1s, 2s, 4s… up to 30s); after 15
+  quick crashes in a row the process is marked errored instead of looping.
+- `stop` sends SIGTERM to the whole process group, then SIGKILL after 5s.
+- `stop`, `restart`, `delete`, `describe` and `logs` take a name, an id or `all`.
+- `procly save` / `resurrect`, and `procly startup` for systemd (Linux) or
+  launchd (macOS) to bring everything back after a reboot.
+
+### Watch them
+
+- `procly ls`: a table with status, PID, uptime, restarts, CPU and memory.
+- `procly logs`: recent lines and live output, stderr marked, `--lines`,
+  `--out`, `--err`, `--no-follow`.
+- `procly monit`: a terminal dashboard with CPU/memory graphs, live logs and
+  keys to restart, stop, start and delete.
+- `procly web`: the same in the browser, built into the binary. Password login
+  (bcrypt), HttpOnly SameSite cookies, CSRF protection, per-IP login limit,
+  strict CSP. Works on phones; follows light and dark mode.
+
+### Many servers
+
+- `procly agent` on each reachable server and `procly server add` on the hub.
+  TLS 1.3 with the agent's certificate pinned by fingerprint; the agent stores
+  only a hash of its token and can't be used to start new commands.
+- Behind NAT: `procly hub` plus `procly server invite`, and on the other side
+  `procly agent join` / `procly agent connect`. The agent dials out and keeps
+  one connection; requests and logs run as HTTP/2 streams over it.
+- `--server <name>` (or `PROCLY_SERVER`) runs `ls`, `describe`, `stop`,
+  `restart`, `delete`, `logs` and `save` on any connected server, and the web
+  panel shows a tab per server.
+
+### Install
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/itsahmadnyc/procly/main/install.sh | sh
+```
+
+Prebuilt for linux/darwin on amd64 and arm64. Checksums are in `checksums.txt`.

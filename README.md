@@ -13,13 +13,25 @@ keeps its logs, and brings everything back after a reboot.
 
 ## Install
 
-With Go 1.22 or newer:
+Linux or macOS, amd64 or arm64:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/itsahmadnyc/procly/main/install.sh | sh
+```
+
+The script downloads the latest release, checks it against `checksums.txt`
+and puts `procly` in `/usr/local/bin` (using sudo if needed) or `~/.local/bin`.
+Pin a version with `PROCLY_VERSION=0.1.0`, or pick the folder with
+`PROCLY_INSTALL_DIR`. Prefer to look first? Read [install.sh](install.sh), or
+download an archive from [Releases](https://github.com/itsahmadnyc/procly/releases).
+
+With Go (1.21 or newer fetches the required toolchain itself):
 
 ```sh
 go install github.com/itsahmadnyc/procly/cmd/procly@latest
 ```
 
-Or from source:
+From source:
 
 ```sh
 git clone https://github.com/itsahmadnyc/procly && cd procly
