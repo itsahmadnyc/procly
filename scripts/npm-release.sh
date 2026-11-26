@@ -77,6 +77,7 @@ cp LICENSE "$main/"
 sed -E -e "s|src=\"docs/|src=\"https://raw.githubusercontent.com/$repo/main/docs/|g" \
 	-e "s|srcset=\"docs/|srcset=\"https://raw.githubusercontent.com/$repo/main/docs/|g" \
 	-e "s#\]\(([A-Za-z][A-Za-z0-9_./-]*\.(sh|md|yml))\)#](https://github.com/$repo/blob/main/\1)#g" \
+	-e "s#\]\(LICENSE\)#](https://github.com/$repo/blob/main/LICENSE)#g" \
 	README.md >"$main/README.md"
 VERSION=$version DEPS="{${deps%,}}" node -e '
 const fs = require("fs");

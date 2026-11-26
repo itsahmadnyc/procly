@@ -1,5 +1,9 @@
 # procly
 
+[![npm](https://img.shields.io/npm/v/procly?color=2f855a)](https://www.npmjs.com/package/procly)
+[![release](https://img.shields.io/github/v/release/itsahmadnyc/procly?color=2f855a)](https://github.com/itsahmadnyc/procly/releases)
+[![license](https://img.shields.io/github/license/itsahmadnyc/procly?color=2f855a)](LICENSE)
+
 A process manager for your servers. One small binary, no runtime needed.
 Runs Node, Python, Go, or any other command, restarts it when it crashes,
 keeps its logs, and brings everything back after a reboot.
