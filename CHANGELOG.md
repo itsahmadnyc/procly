@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- `procly ls --json` and `procly describe <name> --json` print machine-readable output: the same objects the panel uses (stable field names, no colors, environment variable names but never values), also with `--server`. `ls --json` prints `[]` when no daemon is running.
 - `procly start` error for a file it cannot run now names the file and a command to pass (`go run`, `java -jar`, or `<command>`), and says `chmod +x` makes it runnable directly. `.mjs`, `.cjs` and executable files already ran; they now have tests.
 
 ## v0.3.1

@@ -1,11 +1,16 @@
 package cli
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -331,4 +336,121 @@ func TestCLIEnvFileInConfig(t *testing.T) {
 	c.ok("start", "conf/procly.yml")
 	who := filepath.Join(c.dir, "who.txt")
 	waitFor(t, "who.txt", func() bool { b, err := os.ReadFile(who); return err == nil && strings.Contains(string(b), "config") })
+}
+
+func TestCLIJSONOutput(t *testing.T) {
+	c := newCLI(t)
+
+	// Without a daemon there are no processes: an empty array, exit 0, nothing else on stdout.
+	out := c.ok("ls", "--json")
+	var none []map[string]any
+	if err := json.Unmarshal([]byte(out), &none); err != nil || len(none) != 0 {
+		t.Fatalf("ls --json with no daemon should print []: %q (%v)", out, err)
+	}
+
+	c.file(".env", "FROM_FILE=filevalue\n")
+	c.ok("start", "sleep 30", "--name", "alpha", "-e", "SECRET=topsecret", "--env-file", ".env")
+	c.ok("start", "sleep 31", "--name", "beta", "--no-autorestart")
+
+	out = c.ok("ls", "--json")
+	if strings.Contains(out, "\x1b[") {
+		t.Errorf("no colors in JSON: %q", out)
+	}
+	var views []struct {
+		ID          int      `json:"id"`
+		Name        string   `json:"name"`
+		Status      string   `json:"status"`
+		PID         int      `json:"pid"`
+		Command     string   `json:"command"`
+		AutoRestart bool     `json:"autorestart"`
+		EnvKeys     []string `json:"env_keys"`
+	}
+	if err := json.Unmarshal([]byte(out), &views); err != nil {
+		t.Fatalf("ls --json is not one JSON array: %v\n%s", err, out)
+	}
+	if len(views) != 2 || views[0].Name != "alpha" || views[1].Name != "beta" {
+		t.Fatalf("views = %+v", views)
+	}
+	if views[0].Status != "online" || views[0].PID <= 0 || views[0].Command != "sleep 30" || !views[0].AutoRestart || views[1].AutoRestart {
+		t.Errorf("fields: %+v", views)
+	}
+	if got := strings.Join(views[0].EnvKeys, ","); got != "FROM_FILE,SECRET" {
+		t.Errorf("env names = %q", got)
+	}
+	if strings.Contains(out, "topsecret") || strings.Contains(out, "filevalue") {
+		t.Errorf("values must never be in the JSON:\n%s", out)
+	}
+
+	// describe: one object, by name or id, and a clear failure for an unknown one.
+	var one struct {
+		Name string `json:"name"`
+		ID   int    `json:"id"`
+	}
+	if err := json.Unmarshal([]byte(c.ok("describe", "beta", "--json")), &one); err != nil || one.Name != "beta" {
+		t.Errorf("describe --json by name: %+v (%v)", one, err)
+	}
+	if err := json.Unmarshal([]byte(c.ok("describe", fmt.Sprint(views[0].ID), "--json")), &one); err != nil || one.Name != "alpha" {
+		t.Errorf("describe --json by id: %+v (%v)", one, err)
+	}
+	c.fails("describe", "nope", "--json")
+
+	// The table output is unchanged without the flag.
+	contains(t, c.ok("ls"), "alpha", "beta", "online")
+}
+
+// syncBuffer lets a test read what a background process has printed so far.
+type syncBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+func (s *syncBuffer) String() string { s.mu.Lock(); defer s.mu.Unlock(); return s.b.String() }
+
+func TestCLIJSONFromAnotherServer(t *testing.T) {
+	far, here := newCLI(t), newCLI(t)
+	far.ok("start", "sleep 30", "--name", "far-app")
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	ln.Close()
+	out := &syncBuffer{}
+	agent := exec.Command(binary, "agent", "--addr", addr)
+	agent.Dir = far.dir
+	agent.Env = append(os.Environ(), "PROCLY_HOME="+far.home, "NO_COLOR=1", "PROCLY_SERVER=")
+	agent.Stdout, agent.Stderr = out, out
+	if err := agent.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { agent.Process.Kill(); agent.Wait() })
+	waitFor(t, "the agent to print its token", func() bool { return strings.Contains(out.String(), "--token") })
+
+	var token string
+	for _, l := range strings.Split(out.String(), "\n") {
+		if f := strings.Fields(l); len(f) == 3 && f[0] == "--token" {
+			token = f[1]
+		}
+	}
+	fp := regexp.MustCompile(`sha256:[0-9a-f]{64}`).FindString(out.String())
+	if token == "" || fp == "" {
+		t.Fatalf("no token or fingerprint in the agent's output:\n%s", out.String())
+	}
+	here.ok("server", "add", "far", "https://"+addr, "--token", token, "--fingerprint", fp)
+
+	var views []struct{ Name, Status string }
+	if err := json.Unmarshal([]byte(here.ok("ls", "--json", "--server", "far")), &views); err != nil || len(views) != 1 || views[0].Name != "far-app" || views[0].Status != "online" {
+		t.Errorf("ls --json --server: %+v (%v)", views, err)
+	}
+	var one struct{ Name string }
+	if err := json.Unmarshal([]byte(here.ok("describe", "far-app", "--json", "-S", "far")), &one); err != nil || one.Name != "far-app" {
+		t.Errorf("describe --json -S: %+v (%v)", one, err)
+	}
+	here.fails("describe", "nope", "--json", "-S", "far")
 }
