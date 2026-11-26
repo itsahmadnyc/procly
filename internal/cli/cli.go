@@ -41,7 +41,8 @@ Processes
   describe <name|id> [--json]   Details for one process            alias: show
   logs [name|id]                Print and follow logs
   monit                         Live dashboard in the terminal     alias: dash
-  web                           Web panel (--addr, --port, --reset-password)
+  web                           Web panel (--addr, --port, --reset-password,
+                                --trusted-proxy <addr|range>, repeatable)
 
 Alerts
   alerts                        Telegram/Slack messages on crashes and failed health checks
@@ -729,7 +730,7 @@ func cmdMonit() error {
 
 func cmdWeb(argv []string) error {
 	a, err := parse(argv, flagSet{
-		valued: set("addr", "port"),
+		valued: set("addr", "port", "trusted-proxy"),
 		bools:  set("reset-password"),
 	})
 	if err != nil {
@@ -752,7 +753,7 @@ func cmdWeb(argv []string) error {
 	if _, err := ensureDaemon(); err != nil {
 		return err
 	}
-	return web.Run(web.Options{Addr: addr, ResetPassword: a.bools["reset-password"], Out: os.Stdout})
+	return web.Run(web.Options{Addr: addr, ResetPassword: a.bools["reset-password"], TrustedProxies: a.values["trusted-proxy"], Out: os.Stdout})
 }
 
 func cmdDaemon(argv []string) error {

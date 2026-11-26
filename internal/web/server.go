@@ -39,13 +39,17 @@ const DefaultAddr = "127.0.0.1:4747"
 type Options struct {
 	Addr          string
 	ResetPassword bool
-	Out           io.Writer // where the startup banner goes
+	// TrustedProxies are addresses or ranges allowed to set X-Forwarded-For;
+	// empty trusts nobody. See ParseTrustedProxies.
+	TrustedProxies []string
+	Out            io.Writer // where the startup banner goes
 }
 
 type server struct {
 	servers *registry
 	auth    *auth
 	host    string
+	proxies trustedProxies // who may say who the visitor is, see clientIP
 }
 
 // Run serves the panel until SIGINT/SIGTERM.
@@ -57,8 +61,12 @@ func Run(opts Options) error {
 	if err != nil {
 		return err
 	}
+	proxies, err := ParseTrustedProxies(opts.TrustedProxies)
+	if err != nil {
+		return err
+	}
 	host, _ := os.Hostname()
-	s := &server{servers: newRegistry(localBackend{client.New()}), auth: a, host: host}
+	s := &server{servers: newRegistry(localBackend{client.New()}), auth: a, host: host, proxies: proxies}
 
 	ln, err := net.Listen("tcp", opts.Addr)
 	if err != nil {
@@ -73,6 +81,16 @@ func Run(opts Options) error {
 	}
 
 	printBanner(opts.Out, ln.Addr().String(), newPassword)
+	if len(proxies) > 0 {
+		out := opts.Out
+		if out == nil {
+			out = os.Stdout
+		}
+		fmt.Fprintf(out, "\n  Trusting X-Forwarded-For from %s for the login lockout.\n", proxies)
+		if proxies.broad() {
+			fmt.Fprintln(out, "  Warning: that is every address, so anyone can choose which address gets locked out.")
+		}
+	}
 
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
@@ -171,16 +189,8 @@ func (s *server) csrf(h http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-func clientIP(r *http.Request) string {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
-}
-
 func (s *server) login(w http.ResponseWriter, r *http.Request) {
-	ip := clientIP(r)
+	ip := s.clientIP(r)
 	if ok, wait := s.auth.allowLogin(ip); !ok {
 		w.Header().Set("Retry-After", fmt.Sprint(int(wait.Seconds())+1))
 		writeJSON(w, http.StatusTooManyRequests, map[string]string{

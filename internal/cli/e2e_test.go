@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -662,4 +663,71 @@ func TestCLIScheduledRestartSettings(t *testing.T) {
 	c.ok("resurrect")
 	contains(t, c.ok("describe", "nightly"), "24h", "04:00")
 	contains(t, c.ok("describe", "byflag"), "03:30")
+}
+
+// loginStatus signs in to a panel at addr as a reverse proxy would, claiming
+// the visitor is forwardedFor.
+func loginStatus(t *testing.T, addr, password, forwardedFor string) int {
+	t.Helper()
+	body, _ := json.Marshal(map[string]string{"password": password})
+	req, _ := http.NewRequest(http.MethodPost, "http://"+addr+"/api/login", bytes.NewReader(body))
+	req.Header.Set("X-Procly", "1")
+	req.Header.Set("Content-Type", "application/json")
+	if forwardedFor != "" {
+		req.Header.Set("X-Forwarded-For", forwardedFor)
+	}
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	return res.StatusCode
+}
+
+func panelPassword(t *testing.T, out *syncBuffer) string {
+	t.Helper()
+	waitFor(t, "the panel to print its password", func() bool { return strings.Contains(out.String(), "password  ") })
+	for _, l := range strings.Split(out.String(), "\n") {
+		if f := strings.Fields(l); len(f) == 2 && f[0] == "password" {
+			return f[1]
+		}
+	}
+	t.Fatalf("no password in:\n%s", out.String())
+	return ""
+}
+
+func TestCLIWebTrustedProxy(t *testing.T) {
+	// Without the flag, every visitor behind a proxy shares the proxy's address.
+	c := newCLI(t)
+	addr := freeAddr(t)
+	out := startBackground(t, c, "web", "--addr", addr)
+	pw := panelPassword(t, out)
+	for i := 0; i < 5; i++ {
+		loginStatus(t, addr, "nope", "198.51.100.1")
+	}
+	if got := loginStatus(t, addr, pw, "198.51.100.2"); got != http.StatusTooManyRequests {
+		t.Errorf("without --trusted-proxy one visitor's typos lock everyone out: %d", got)
+	}
+
+	// With the flag, the lockout follows the visitor the proxy reports.
+	c2 := newCLI(t)
+	addr2 := freeAddr(t)
+	out2 := startBackground(t, c2, "web", "--addr", addr2, "--trusted-proxy", "127.0.0.1")
+	pw2 := panelPassword(t, out2)
+	contains(t, out2.String(), "Trusting X-Forwarded-For from 127.0.0.1/32")
+	for i := 0; i < 5; i++ {
+		loginStatus(t, addr2, "nope", "9.9.9.9, 198.51.100.1")
+	}
+	if got := loginStatus(t, addr2, pw2, "198.51.100.1"); got != http.StatusTooManyRequests {
+		t.Errorf("the visitor who mistyped is locked out: %d", got)
+	}
+	if got := loginStatus(t, addr2, pw2, "198.51.100.2"); got != http.StatusOK {
+		t.Errorf("another visitor is not: %d", got)
+	}
+
+	// Mistakes are refused at start, and trusting everything is called out.
+	contains(t, c.fails("web", "--port", "1", "--trusted-proxy", "nonsense"), "--trusted-proxy", "nonsense")
+	c3 := newCLI(t)
+	out3 := startBackground(t, c3, "web", "--addr", freeAddr(t), "--trusted-proxy", "0.0.0.0/0")
+	waitFor(t, "the warning", func() bool { return strings.Contains(out3.String(), "that is every address") })
 }
