@@ -1,34 +1,36 @@
 <h1><img src="docs/brand/mark.svg" width="36" height="36" alt="" align="top"> procly</h1>
 
+**A process manager for your servers.** One small binary, no runtime needed. It
+runs Node, Python, Go or any other command, restarts it when it crashes, keeps
+its logs, and gives you a terminal dashboard and a web panel for all of it,
+across as many servers as you have.
+
 [![npm](https://img.shields.io/npm/v/procly?color=2eaa5c)](https://www.npmjs.com/package/procly)
 [![release](https://img.shields.io/github/v/release/itsahmadnyc/procly?color=2eaa5c)](https://github.com/itsahmadnyc/procly/releases)
 [![license](https://img.shields.io/github/license/itsahmadnyc/procly?color=2eaa5c)](LICENSE)
+![platforms](https://img.shields.io/badge/platforms-linux%20%7C%20macOS-0f1115)
 
-A process manager for your servers. One small binary, no runtime needed.
-Runs Node, Python, Go, or any other command, restarts it when it crashes,
-keeps its logs, and brings everything back after a reboot.
+[Install](#install) · [Quick start](#quick-start) · [Web panel](#web-panel) · [Several servers](#several-servers) · [Coming from PM2](#coming-from-pm2) · [Contributing](#contributing)
 
-<img alt="procly start, procly monit and the web panel in a 30 second demo" src="docs/demo.gif" width="828">
+<picture>
+  <source media="(prefers-color-scheme: light)" srcset="docs/web-overview-light.png">
+  <img alt="procly web panel overview: every server, what needs attention, recent events" src="docs/web-overview-dark.png">
+</picture>
 
-> Status: early MVP. The CLI, daemon, terminal dashboard, web panel and multi-server support work.
+## What you get
 
-## procly vs PM2
-
-Same machine, same ten apps (a small Node HTTP server each), median of three runs:
-
-| | procly | PM2 |
-|---|---|---|
-| Install size | 9.4 MB, one binary, no runtime | 16.7 MB of node_modules, plus Node (117 MB) |
-| Daemon memory, 10 apps running | **8.2 MB** | 63.0 MB |
-| Memory of the 10 apps themselves | 465 MB | 572 MB |
-| Start command to first HTTP response | **95 ms** | 234 ms |
-| `ls` | **7 ms** | 54 ms |
-
-PM2 7.1.2 in fork mode, Node 22, procly 0.2.0, Linux arm64 with 4 CPUs (a Docker
-container in a VM, not bare metal, so absolute numbers will differ on your
-server). PM2 runs each app inside its own Node wrapper, which is where the extra
-app memory comes from. Run it yourself with [`scripts/bench.sh`](scripts/bench.sh):
-it installs PM2 into a temporary folder and leaves your setup alone.
+- **Keeps things running.** Restarts a crashed process with a growing delay, and
+  gives up after 15 quick crashes in a row instead of looping forever.
+- **Knows when something is wrong.** Health checks (`http://` or `tcp://`),
+  and Telegram or Slack messages on crashes, give-ups and failed checks.
+- **Logs that behave.** Rotated at 10 MB without restarting the process, and
+  searchable live in the panel.
+- **A terminal dashboard** (`procly monit`) and **a web panel** you host
+  yourself: light and dark, works on a phone, asks before it interrupts anything.
+- **Many servers, one panel.** Connect servers directly, or let ones behind NAT
+  dial in. Every connection pins a certificate; nothing trusts a CA.
+- **Survives a reboot.** `procly save`, then `procly startup` for systemd or launchd.
+- **Small.** A single binary of about 10 MB, and a daemon that idles around 8 MB. No Node needed to run it.
 
 ## Install
 
@@ -80,96 +82,15 @@ procly ls
   2 processes · 2 online
 ```
 
-## Commands
-
-| Command | What it does |
-|---|---|
-| `procly start <file\|command\|config>` | Start a process, or every app in a config file |
-| `procly stop <name\|id\|all>` | Stop (SIGTERM, then SIGKILL after 5s) |
-| `procly restart <name\|id\|all>` | Restart |
-| `procly delete <name\|id\|all>` | Stop and forget |
-| `procly ls` | Table of processes with CPU and memory |
-| `procly describe <name>` | Everything about one process |
-| `procly logs [name]` | Print recent lines and follow |
-| `procly monit` | Live dashboard: processes, CPU/memory graphs, logs |
-| `procly web` | Web panel for the same, in the browser |
-| `procly agent` | Let another server's panel manage this one |
-| `procly server add/ls/rm` | Connect, list and remove other servers |
-| `procly hub` / `server invite` | Manage servers behind NAT that dial in |
-| `procly save` / `procly resurrect` | Remember the process list / bring it back |
-| `procly startup` | Start on boot (systemd on Linux, launchd on macOS) |
-| `procly kill` | Stop all processes and the daemon |
-
-Files are run by extension (`.js` with node, `.py` with python3, `.sh` with bash, ...).
-Arguments for your script go after `--`: `procly start app.js -- --port 3000`.
-
-## Health checks
+Then open the dashboards, and make it all come back after a reboot:
 
 ```sh
-procly start server.js --name api --health http://127.0.0.1:3000/health
-procly start redis-server --health tcp://127.0.0.1:6379
+procly monit                # in the terminal
+procly web                  # in the browser, http://127.0.0.1:4747
+procly save && procly startup
 ```
-
-After a 10s grace period procly checks every 10s. Three failures in a row
-restart the process; `procly ls`, `procly describe` and the web panel show
-`healthy` or `unhealthy`, with the last error. Tune it per app in `procly.yml`
-(`health_interval`, `health_timeout`, `health_retries`, `health_grace`).
-
-## Log rotation
-
-Logs rotate at 10 MB by default, keeping three old files
-(`~/.procly/logs/api-out.log.1`, `.2`, `.3`). Change it with
-`--log-max-size 50MB --log-keep 5`, or in `procly.yml`. Rotation copies the log
-and empties it in place, so running processes keep writing without a restart.
-
-## Alerts
-
-Get a message when a process crashes, when procly gives up restarting it, or
-when its health check fails:
-
-```sh
-procly alerts telegram --token <bot token> --chat <chat id>
-procly alerts slack --webhook https://hooks.slack.com/services/...
-procly alerts           # what is set up
-procly alerts test
-procly alerts off
-```
-
-A test message goes out first; settings are saved only if it arrives. A crash
-loop sends one message per process every five minutes, with a count of the
-ones it skipped. Tokens are kept in `~/.procly/alerts.json` (mode 600). For
-Telegram, create a bot with @BotFather, send it a message, and read your chat
-id from `https://api.telegram.org/bot<token>/getUpdates`.
-
-## Live dashboard
-
-<picture>
-  <source media="(prefers-color-scheme: light)" srcset="docs/monit-light.png">
-  <img alt="procly monit: live process table, CPU and memory sparklines, and streaming logs" src="docs/monit-dark.png">
-</picture>
-
-`procly monit` opens a full-screen view of every process with CPU and memory
-sparklines and the selected process's logs streaming underneath.
-
-| Key | Action |
-|---|---|
-| `↑` `↓` / `k` `j` | Select a process |
-| `r` | Restart |
-| `s` | Stop, or start if stopped |
-| `d` | Delete (asks first) |
-| `enter` | Expand logs, `esc` to go back |
-| `?` | All keys |
-| `q` | Quit (processes keep running) |
-
-Colors follow your terminal theme. If it guesses light/dark wrong, set
-`PROCLY_THEME=light` or `PROCLY_THEME=dark`.
 
 ## Web panel
-
-<picture>
-  <source media="(prefers-color-scheme: light)" srcset="docs/web-overview-light.png">
-  <img alt="procly web panel overview: every server, what needs attention, recent events" src="docs/web-overview-dark.png">
-</picture>
 
 <picture>
   <source media="(prefers-color-scheme: light)" srcset="docs/web-logs-light.png">
@@ -223,6 +144,29 @@ To keep the panel running, start it once by hand to note the password, stop it, 
 Security: sessions are HttpOnly, SameSite=Strict cookies; every write needs an
 `X-Procly` header (CSRF); five wrong passwords lock an IP out for ten minutes;
 environment variable values never leave the server, only their names.
+
+## Live dashboard
+
+<picture>
+  <source media="(prefers-color-scheme: light)" srcset="docs/monit-light.png">
+  <img alt="procly monit: live process table, CPU and memory sparklines, and streaming logs" src="docs/monit-dark.png">
+</picture>
+
+`procly monit` opens a full-screen view of every process with CPU and memory
+sparklines and the selected process's logs streaming underneath.
+
+| Key | Action |
+|---|---|
+| `↑` `↓` / `k` `j` | Select a process |
+| `r` | Restart |
+| `s` | Stop, or start if stopped |
+| `d` | Delete (asks first) |
+| `enter` | Expand logs, `esc` to go back |
+| `?` | All keys |
+| `q` | Quit (processes keep running) |
+
+Colors follow your terminal theme. If it guesses light/dark wrong, set
+`PROCLY_THEME=light` or `PROCLY_THEME=dark`.
 
 ## Several servers
 
@@ -303,6 +247,67 @@ directly reachable servers.
   connection; `procly server rm <name>` cuts it off within ten seconds.
 - Only the hub's port 4749 needs to be reachable; the agent opens nothing.
 
+## Health checks
+
+```sh
+procly start server.js --name api --health http://127.0.0.1:3000/health
+procly start redis-server --health tcp://127.0.0.1:6379
+```
+
+After a 10s grace period procly checks every 10s. Three failures in a row
+restart the process; `procly ls`, `procly describe` and the web panel show
+`healthy` or `unhealthy`, with the last error. Tune it per app in `procly.yml`
+(`health_interval`, `health_timeout`, `health_retries`, `health_grace`).
+
+## Log rotation
+
+Logs rotate at 10 MB by default, keeping three old files
+(`~/.procly/logs/api-out.log.1`, `.2`, `.3`). Change it with
+`--log-max-size 50MB --log-keep 5`, or in `procly.yml`. Rotation copies the log
+and empties it in place, so running processes keep writing without a restart.
+
+## Alerts
+
+Get a message when a process crashes, when procly gives up restarting it, or
+when its health check fails:
+
+```sh
+procly alerts telegram --token <bot token> --chat <chat id>
+procly alerts slack --webhook https://hooks.slack.com/services/...
+procly alerts           # what is set up
+procly alerts test
+procly alerts off
+```
+
+A test message goes out first; settings are saved only if it arrives. A crash
+loop sends one message per process every five minutes, with a count of the
+ones it skipped. Tokens are kept in `~/.procly/alerts.json` (mode 600). For
+Telegram, create a bot with @BotFather, send it a message, and read your chat
+id from `https://api.telegram.org/bot<token>/getUpdates`.
+
+## Commands
+
+| Command | What it does |
+|---|---|
+| `procly start <file\|command\|config>` | Start a process, or every app in a config file |
+| `procly stop <name\|id\|all>` | Stop (SIGTERM, then SIGKILL after 5s) |
+| `procly restart <name\|id\|all>` | Restart |
+| `procly delete <name\|id\|all>` | Stop and forget |
+| `procly ls` | Table of processes with CPU and memory |
+| `procly describe <name>` | Everything about one process |
+| `procly logs [name]` | Print recent lines and follow |
+| `procly monit` | Live dashboard: processes, CPU/memory graphs, logs |
+| `procly web` | Web panel for the same, in the browser |
+| `procly agent` | Let another server's panel manage this one |
+| `procly server add/ls/rm` | Connect, list and remove other servers |
+| `procly hub` / `server invite` | Manage servers behind NAT that dial in |
+| `procly save` / `procly resurrect` | Remember the process list / bring it back |
+| `procly startup` | Start on boot (systemd on Linux, launchd on macOS) |
+| `procly kill` | Stop all processes and the daemon |
+
+Files are run by extension (`.js` with node, `.py` with python3, `.sh` with bash, ...).
+Arguments for your script go after `--`: `procly start app.js -- --port 3000`.
+
 ## Config file
 
 ```yaml
@@ -340,6 +345,47 @@ procly start procly.yml
 | `health_retries` | `3` | failures in a row before a restart |
 | `health_grace` | `10s` | wait after start before the first check |
 
+## Coming from PM2
+
+The everyday commands are the same:
+
+| PM2 | procly |
+|---|---|
+| `pm2 start app.js --name api` | `procly start app.js --name api` |
+| `pm2 start ecosystem.config.js` | `procly start procly.yml` ([config file](#config-file)) |
+| `pm2 ls` | `procly ls` |
+| `pm2 logs api` | `procly logs api` |
+| `pm2 monit` | `procly monit` |
+| `pm2 restart all` / `stop` / `delete` | `procly restart all` / `stop` / `delete` |
+| `pm2 describe api` | `procly describe api` |
+| `pm2 save` / `pm2 resurrect` | `procly save` / `procly resurrect` |
+| `pm2 startup` | `procly startup` |
+| `pm2 kill` | `procly kill` |
+
+What procly does **not** do (yet): cluster mode and zero-downtime `reload`,
+restart-on-file-change (`--watch`), restart at a memory limit, `pm2 deploy`, and
+Windows. If you rely on those, PM2 is still the better fit. In exchange you get
+the web panel, several servers in one place, and health checks and alerts built
+in.
+
+### Numbers
+
+Same machine, same ten apps (a small Node HTTP server each), median of three runs:
+
+| | procly | PM2 |
+|---|---|---|
+| Install size | 9.4 MB, one binary, no runtime | 16.7 MB of node_modules, plus Node (117 MB) |
+| Daemon memory, 10 apps running | **8.2 MB** | 63.0 MB |
+| Memory of the 10 apps themselves | 465 MB | 572 MB |
+| Start command to first HTTP response | **95 ms** | 234 ms |
+| `ls` | **7 ms** | 54 ms |
+
+PM2 7.1.2 in fork mode, Node 22, procly 0.2.0, Linux arm64 with 4 CPUs (a Docker
+container in a VM, not bare metal, so absolute numbers will differ on your
+server). PM2 runs each app inside its own Node wrapper, which is where the extra
+app memory comes from. Run it yourself with [`scripts/bench.sh`](scripts/bench.sh):
+it installs PM2 into a temporary folder and leaves your setup alone.
+
 ## How it works
 
 `procly` talks to a background daemon over a unix socket (`~/.procly/procly.sock`,
@@ -357,16 +403,20 @@ State lives in `~/.procly` (override with `PROCLY_HOME`):
   logs/<name>-error.log
 ```
 
-## Development
+## Contributing
+
+Bug reports, ideas and pull requests are welcome. Start with
+[CONTRIBUTING.md](CONTRIBUTING.md): it covers setup, where things live and what
+to run before a pull request. Questions and half-formed ideas go in
+[Discussions](https://github.com/itsahmadnyc/procly/discussions). Found a
+security problem? Please report it privately, see [SECURITY.md](SECURITY.md).
 
 ```sh
 go test -race ./...
 ```
 
 Tests start real processes, daemons and TLS connections on localhost, and the
-CLI tests build and run the actual binary. Before a pull request, also run
-`gofmt -l .` and `go vet ./...`, and if you can, the tests on both Linux and
-macOS: process groups, `ps` and `/bin/sh` differ between them.
+CLI tests build and run the actual binary.
 
 ## Roadmap
 
@@ -375,7 +425,7 @@ macOS: process groups, `ps` and `/bin/sh` differ between them.
 - [x] Web panel, embedded in the binary
 - [x] Connect several servers to one panel
 - [x] Log rotation, health checks, Telegram/Slack alerts, start processes from the panel
-- [ ] Deploy from git, cluster mode
+- [ ] Deploy from git, cluster mode, restart at a memory limit
 
 ## License
 

@@ -205,7 +205,9 @@ func TestConfigFileIsPrivate(t *testing.T) {
 }
 
 func TestMask(t *testing.T) {
-	if got := Mask("123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw"); got != "1234…saw" {
+	// Built in pieces so secret scanners don't mistake the sample for a bot token.
+	sample := "123456789:" + "AAH" + strings.Repeat("x", 32)
+	if got := Mask(sample); got != "1234…xxx" {
 		t.Errorf("Mask: %q", got)
 	}
 	if got := Mask("short"); strings.Contains(got, "short") {
