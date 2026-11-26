@@ -5,6 +5,7 @@ runs Node, Python, Go or any other command, restarts it when it crashes, keeps
 its logs, and gives you a terminal dashboard and a web panel for all of it,
 across as many servers as you have.
 
+[![ci](https://github.com/itsahmadnyc/procly/actions/workflows/ci.yml/badge.svg)](https://github.com/itsahmadnyc/procly/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/procly?color=2eaa5c)](https://www.npmjs.com/package/procly)
 [![release](https://img.shields.io/github/v/release/itsahmadnyc/procly?color=2eaa5c)](https://github.com/itsahmadnyc/procly/releases)
 [![license](https://img.shields.io/github/license/itsahmadnyc/procly?color=2eaa5c)](LICENSE)
