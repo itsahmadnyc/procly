@@ -23,8 +23,9 @@ type Manager struct {
 	logger *log.Logger
 	events func(Event)
 
-	runFile string     // where the list of running processes is kept; "" = not kept
-	runMu   sync.Mutex // serializes writes of that file
+	runFile string         // where the list of running processes is kept; "" = not kept
+	runMu   sync.Mutex     // serializes writes of that file
+	bg      sync.WaitGroup // background writes of that file, see WaitIdle
 }
 
 // OnEvent registers a function to call (in its own goroutine) for crashes,
@@ -285,7 +286,18 @@ func (m *Manager) RecognizeOrphans() []Info {
 	return infosOf(found)
 }
 
-func (m *Manager) noteChanged() { m.FlushRunning() }
+func (m *Manager) noteChanged() {
+	m.bg.Add(1)
+	go func() {
+		defer m.bg.Done()
+		m.FlushRunning()
+	}()
+}
+
+// WaitIdle returns once every background write of the running file has
+// finished. Call it after StopAll (which returns after all the Add calls) and
+// before the final FlushRunning, so a late write cannot undo the final one.
+func (m *Manager) WaitIdle() { m.bg.Wait() }
 
 // FlushRunning writes the list of running processes now. The manager does it
 // by itself whenever a process starts or ends; the daemon calls it once more
