@@ -126,6 +126,7 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("GET /api/info", s.private(s.info))
 	mux.HandleFunc("GET /api/servers", s.private(s.serverList))
 	mux.HandleFunc("GET /api/servers/{server}/processes", s.private(s.withBackend(s.list)))
+	mux.HandleFunc("GET /api/servers/{server}/system", s.private(s.withBackend(s.system)))
 	mux.HandleFunc("POST /api/servers/{server}/processes/{name}/{action}", s.private(s.csrf(s.withBackend(s.action))))
 	mux.HandleFunc("GET /api/servers/{server}/processes/{name}/logs", s.private(s.withBackend(s.logs)))
 	mux.HandleFunc("POST /api/servers/{server}/save", s.private(s.csrf(s.withBackend(s.save))))
@@ -374,6 +375,17 @@ func (s *server) save(w http.ResponseWriter, r *http.Request, b backend, server 
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]int{"saved": n})
+}
+
+func (s *server) system(w http.ResponseWriter, r *http.Request, b backend, server string) {
+	ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
+	defer cancel()
+	sys, err := b.System(ctx)
+	if err != nil {
+		writeError(w, server, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, sys)
 }
 
 // logs relays a process's output as server-sent events, whether it comes

@@ -8,6 +8,7 @@ import (
 	"github.com/itsahmadnyc/procly/internal/logtail"
 	"github.com/itsahmadnyc/procly/internal/proc"
 	"github.com/itsahmadnyc/procly/internal/remote"
+	"github.com/itsahmadnyc/procly/internal/sysinfo"
 )
 
 // backend is one server the panel can manage: this machine through the
@@ -17,6 +18,7 @@ type backend interface {
 	Action(ctx context.Context, name, verb string) error
 	Save(ctx context.Context) (int, error)
 	Logs(ctx context.Context, name string, send func([]logtail.Event) bool) error
+	System(ctx context.Context) (sysinfo.System, error)
 }
 
 // starter is a backend that can start new commands. Only the local one is:
@@ -52,6 +54,9 @@ func (l localBackend) Action(_ context.Context, name, verb string) error {
 	}
 	return err
 }
+
+// System reads this machine directly: the panel runs where the daemon runs.
+func (l localBackend) System(context.Context) (sysinfo.System, error) { return sysinfo.Read(), nil }
 
 func (l localBackend) Save(context.Context) (int, error) {
 	n, _, err := l.c.Save()

@@ -17,6 +17,7 @@ import (
 	"github.com/itsahmadnyc/procly/internal/paths"
 	"github.com/itsahmadnyc/procly/internal/proc"
 	"github.com/itsahmadnyc/procly/internal/sse"
+	"github.com/itsahmadnyc/procly/internal/sysinfo"
 	"github.com/itsahmadnyc/procly/internal/tlsid"
 )
 
@@ -146,6 +147,14 @@ func (c *Client) Save(ctx context.Context) (int, error) {
 	}
 	_, err := c.do(ctx, c.api, http.MethodPost, "/v1/save", &out)
 	return out.Saved, err
+}
+
+// System returns the agent machine's load, memory, disk and uptime.
+// Agents older than 0.3 don't have it and answer 404.
+func (c *Client) System(ctx context.Context) (sysinfo.System, error) {
+	var out sysinfo.System
+	_, err := c.do(ctx, c.api, http.MethodGet, "/v1/system", &out)
+	return out, err
 }
 
 // Logs relays the agent's log stream to send until ctx ends.

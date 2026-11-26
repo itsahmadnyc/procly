@@ -271,9 +271,24 @@ func TestTCPHealthCheck(t *testing.T) {
 
 	addr := ln.Addr().String()
 	ln.Close()
-	in := waitHealth(t, m, "redis", HealthUnhealthy)
-	if !strings.Contains(in.HealthErr, addr) {
-		t.Fatalf("health error should name the address: %q", in.HealthErr)
+	// "unhealthy" only shows for a moment: procly restarts the process right
+	// away, which resets the state. The history keeps the failure.
+	deadline := time.Now().Add(8 * time.Second)
+	for {
+		in, _ := m.Get("redis")
+		for _, h := range in.History {
+			if h.Kind != EventUnhealthy {
+				continue
+			}
+			if !strings.Contains(h.Detail, addr) {
+				t.Fatalf("the recorded failure should name the address: %q", h.Detail)
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("never recorded as unhealthy: %+v", in.History)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
 

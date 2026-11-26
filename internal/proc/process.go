@@ -3,6 +3,7 @@ package proc
 import (
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -13,8 +14,6 @@ import (
 	"sync"
 	"syscall"
 	"time"
-
-	"github.com/itsahmadnyc/procly/internal/logtail"
 )
 
 type Status string
@@ -34,20 +33,21 @@ const (
 
 // Info is a point-in-time snapshot of a process, as returned by the API.
 type Info struct {
-	ID        int       `json:"id"`
-	Name      string    `json:"name"`
-	Status    Status    `json:"status"`
-	PID       int       `json:"pid"`
-	Restarts  int       `json:"restarts"`
-	StartedAt time.Time `json:"started_at"`
-	ExitCode  int       `json:"exit_code"`
-	CPU       float64   `json:"cpu"`
-	Memory    int64     `json:"memory"`
-	OutLog    string    `json:"out_log"`
-	ErrLog    string    `json:"err_log"`
-	Health    Health    `json:"health,omitempty"`
-	HealthErr string    `json:"health_error,omitempty"`
-	Spec      Spec      `json:"spec"`
+	ID        int           `json:"id"`
+	Name      string        `json:"name"`
+	Status    Status        `json:"status"`
+	PID       int           `json:"pid"`
+	Restarts  int           `json:"restarts"`
+	StartedAt time.Time     `json:"started_at"`
+	ExitCode  int           `json:"exit_code"`
+	CPU       float64       `json:"cpu"`
+	Memory    int64         `json:"memory"`
+	OutLog    string        `json:"out_log"`
+	ErrLog    string        `json:"err_log"`
+	Health    Health        `json:"health,omitempty"`
+	HealthErr string        `json:"health_error,omitempty"`
+	Spec      Spec          `json:"spec"`
+	History   []HistoryItem `json:"history,omitempty"` // oldest first
 }
 
 // Process supervises one command. All fields are guarded by mu.
@@ -67,12 +67,14 @@ type Process struct {
 	timer     *time.Timer   // pending auto-restart
 	outLog    string
 	errLog    string
+	errStart  int64 // size of errLog when the current run started
 	logger    *log.Logger
 
 	health      Health
 	healthFails int
 	healthErr   string
 	events      func(Event) // may be nil
+	history     []HistoryItem
 }
 
 func newProcess(id int, spec Spec, logDir string, logger *log.Logger, events func(Event)) *Process {
@@ -103,6 +105,9 @@ func (p *Process) launchLocked() error {
 		return err
 	}
 	defer errf.Close()
+	if fi, err := errf.Stat(); err == nil {
+		p.errStart = fi.Size()
+	}
 
 	cmd := exec.Command("/bin/sh", "-c", shellCommand(p.spec.Command))
 	cmd.Dir = p.spec.Cwd
@@ -114,6 +119,7 @@ func (p *Process) launchLocked() error {
 	if err := cmd.Start(); err != nil {
 		fmt.Fprintf(errf, "[procly] failed to start: %v\n", err)
 		p.status = StatusErrored
+		p.noteLocked(EventErrored, 0, "failed to start: "+err.Error())
 		return fmt.Errorf("start %s: %w", p.spec.Name, err)
 	}
 
@@ -129,6 +135,7 @@ func (p *Process) launchLocked() error {
 		p.health = HealthStarting
 		go p.healthLoop(cmd, exited, p.spec)
 	}
+	p.noteLocked(HistoryStarted, 0, "pid "+strconv.Itoa(p.pid))
 	p.logger.Printf("%s: started pid=%d", p.spec.Name, p.pid)
 	go p.wait(cmd, exited)
 	return nil
@@ -151,6 +158,7 @@ func (p *Process) wait(cmd *exec.Cmd, exited chan struct{}) {
 	if p.stopping {
 		p.stopping = false
 		p.status = StatusStopped
+		p.noteLocked(HistoryStopped, 0, "") // the code is just our SIGTERM
 		p.logger.Printf("%s: stopped", p.spec.Name)
 		return
 	}
@@ -159,9 +167,12 @@ func (p *Process) wait(cmd *exec.Cmd, exited chan struct{}) {
 	if !p.spec.ShouldAutoRestart() {
 		if code == 0 {
 			p.status = StatusStopped
+			p.noteLocked(HistoryExited, 0, "")
 		} else {
 			p.status = StatusErrored
-			p.emit(Event{Kind: EventErrored, Process: p.spec.Name, ExitCode: code, Restarts: p.restarts, Detail: p.lastErrLines()})
+			detail := p.lastErrLines()
+			p.noteLocked(EventErrored, code, detail)
+			p.emit(Event{Kind: EventErrored, Process: p.spec.Name, ExitCode: code, Restarts: p.restarts, Detail: detail})
 		}
 		return
 	}
@@ -172,21 +183,55 @@ func (p *Process) wait(cmd *exec.Cmd, exited chan struct{}) {
 	if p.crashes > p.spec.MaxRestartsOrDefault() {
 		p.status = StatusErrored
 		p.logger.Printf("%s: crashed %d times in a row, giving up", p.spec.Name, p.crashes-1)
-		p.emit(Event{Kind: EventErrored, Process: p.spec.Name, ExitCode: code, Restarts: p.restarts,
-			Detail: fmt.Sprintf("gave up after %d quick crashes\n%s", p.crashes-1, p.lastErrLines())})
+		detail := fmt.Sprintf("gave up after %d quick crashes\n%s", p.crashes-1, p.lastErrLines())
+		p.noteLocked(EventErrored, code, detail)
+		p.emit(Event{Kind: EventErrored, Process: p.spec.Name, ExitCode: code, Restarts: p.restarts, Detail: detail})
 		return
 	}
 	delay := backoff(p.spec.restartDelay(), p.crashes)
 	p.status = StatusWaiting
 	p.timer = time.AfterFunc(delay, p.autoRestart)
 	p.logger.Printf("%s: restarting in %s", p.spec.Name, delay)
-	p.emit(Event{Kind: EventCrashed, Process: p.spec.Name, ExitCode: code, Restarts: p.restarts + 1, Retry: delay, Detail: p.lastErrLines()})
+	detail := p.lastErrLines()
+	p.noteLocked(EventCrashed, code, detail)
+	p.emit(Event{Kind: EventCrashed, Process: p.spec.Name, ExitCode: code, Restarts: p.restarts + 1, Retry: delay, Detail: detail})
 }
 
-// lastErrLines returns the end of the stderr log, for alerts.
+// lastErrLines returns the last stderr lines of the run that just ended, for
+// alerts and history. Earlier runs are left out, so a crash loop doesn't show
+// the previous crash's error again. Caller holds p.mu.
 func (p *Process) lastErrLines() string {
-	lines, _ := logtail.Tail(p.errLog, 5)
-	return strings.Join(lines, "\n")
+	f, err := os.Open(p.errLog)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil {
+		return ""
+	}
+	start := p.errStart
+	if start > fi.Size() {
+		start = 0 // rotated (copy-truncate) during the run
+	}
+	const window = 16 << 10
+	cut := fi.Size()-start > window
+	if cut {
+		start = fi.Size() - window
+	}
+	buf := make([]byte, fi.Size()-start)
+	if _, err := f.ReadAt(buf, start); err != nil && err != io.EOF {
+		return ""
+	}
+	text := strings.TrimRight(string(buf), "\n")
+	if text == "" {
+		return ""
+	}
+	lines := strings.Split(text, "\n")
+	if cut && len(lines) > 1 {
+		lines = lines[1:] // probably cut in half
+	}
+	return strings.Join(lines[max(len(lines)-5, 0):], "\n")
 }
 
 func (p *Process) autoRestart() {
@@ -259,6 +304,7 @@ func (p *Process) infoLocked() Info {
 		Health:    p.health,
 		HealthErr: p.healthErr,
 		Spec:      p.spec,
+		History:   append([]HistoryItem(nil), p.history...),
 	}
 	if p.cmd != nil {
 		info.StartedAt = p.startedAt

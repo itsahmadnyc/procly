@@ -5,15 +5,18 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
   <title>procly</title>
-  <link rel="icon" href="data:,">
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
   <link rel="stylesheet" href="/assets/style.css">
+  <script src="/assets/icons.js" defer></script>
   <script src="/assets/app.js" defer></script>
 </head>
 <body>
   <div id="login" class="login" hidden>
     <form id="login-form" class="login-card" autocomplete="on">
-      <div class="brand">procly</div>
-      <p class="muted" id="login-host">Sign in to manage this server.</p>
+      <div class="brand"><img class="brand-mark" src="/assets/favicon.svg" alt="" width="32" height="32"><span>procly</span></div>
+      <h1>Sign in</h1>
+      <p class="muted">Enter the panel password for this server.</p>
       <label for="password">Password</label>
       <input id="password" name="password" type="password" autocomplete="current-password" required autofocus>
       <p class="error" id="login-error" role="alert"></p>
@@ -23,105 +26,82 @@
   </div>
 
   <div id="app" class="app" hidden>
-    <header class="topbar">
-      <div class="brand">procly</div>
-      <div class="host" id="host"></div>
-      <div class="summary" id="summary"></div>
-      <div class="top-actions">
-        <button class="btn ghost" id="save-btn" title="Remember this process list for reboots (procly save)">Save list</button>
-        <button class="btn ghost" id="logout-btn">Sign out</button>
+    <aside class="sidebar" id="sidebar" aria-label="Main">
+      <div class="side-top">
+        <a class="brand" href="#/"><img class="brand-mark" src="/assets/favicon.svg" alt="" width="24" height="24"><span>procly</span></a>
+        <button class="icon-btn side-close" id="side-close" aria-label="Close menu"></button>
       </div>
-    </header>
 
-    <nav class="servers" id="servers" aria-label="Servers" hidden></nav>
+      <div class="switcher">
+        <button class="switch-btn" id="switch-btn" aria-haspopup="listbox" aria-expanded="false">
+          <span class="dot" id="switch-dot"></span>
+          <span class="switch-text">
+            <span class="switch-label">Server</span>
+            <span class="switch-name" id="switch-name"></span>
+          </span>
+          <span class="switch-chev" id="switch-chev"></span>
+        </button>
+        <div class="menu switch-menu" id="switch-menu" role="listbox" hidden></div>
+      </div>
 
-    <div class="banner" id="banner" hidden></div>
+      <nav class="nav" id="nav"></nav>
 
-    <main class="layout">
-      <section class="panel list-panel" aria-label="Processes">
-        <div class="panel-head">
-          <h2>Processes</h2>
-          <input id="filter" class="filter" type="search" placeholder="Filter" aria-label="Filter processes" spellcheck="false">
-          <kbd class="filter-key">/</kbd>
-          <button class="btn small" id="new-btn" title="Start a new process on this server">New process</button>
-        </div>
-        <div class="table-wrap">
-          <table class="procs">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Status</th>
-                <th class="num hide-sm">PID</th>
-                <th class="num">CPU</th>
-                <th class="num">Memory</th>
-                <th class="num hide-sm">Uptime</th>
-                <th class="num" title="Restarts">↺</th>
-              </tr>
-            </thead>
-            <tbody id="rows"></tbody>
-          </table>
-          <div class="empty" id="empty" hidden></div>
-        </div>
-      </section>
+      <div class="side-bottom">
+        <div class="conn" id="conn"></div>
+        <button class="nav-item" id="logout-btn"><span class="nav-icon" id="logout-icon"></span><span>Sign out</span></button>
+      </div>
+    </aside>
+    <div class="scrim" id="scrim" hidden></div>
 
-      <section class="panel detail-panel" id="detail" aria-label="Process details">
-        <div class="detail-empty muted" id="detail-empty">Select a process to see its details and logs.</div>
-        <div class="detail-body" id="detail-body" hidden>
-          <div class="detail-head">
-            <div class="detail-title">
-              <h2 id="d-name"></h2>
-              <span class="status" id="d-status"></span>
-            </div>
-            <div class="detail-actions">
-              <button class="btn" id="act-restart"><span>Restart</span><kbd>r</kbd></button>
-              <button class="btn" id="act-toggle"><span>Stop</span><kbd>s</kbd></button>
-              <button class="btn danger" id="act-delete">Delete</button>
-            </div>
-          </div>
-
-          <dl class="facts" id="d-facts"></dl>
-
-          <div class="metrics">
-            <div class="metric">
-              <div class="metric-label"><span>CPU</span><span class="metric-value" id="m-cpu"></span></div>
-              <svg class="spark" id="s-cpu" viewBox="0 0 120 32" preserveAspectRatio="none" aria-hidden="true"></svg>
-            </div>
-            <div class="metric">
-              <div class="metric-label"><span>Memory</span><span class="metric-value" id="m-mem"></span></div>
-              <svg class="spark" id="s-mem" viewBox="0 0 120 32" preserveAspectRatio="none" aria-hidden="true"></svg>
-            </div>
-          </div>
-
-          <div class="cmd"><span class="muted">$</span> <span id="d-cmd"></span></div>
-
-          <div class="logs">
-            <div class="logs-head">
-              <h3>Logs</h3>
-              <span class="stream-state" id="stream-state"></span>
-              <div class="logs-tools">
-                <label class="check"><input type="checkbox" id="only-err"> stderr only</label>
-                <button class="btn ghost small" id="clear-logs">Clear</button>
-              </div>
-            </div>
-            <div class="log" id="log" tabindex="0" aria-live="off"></div>
-            <button class="btn small jump" id="jump" hidden>Jump to latest ↓</button>
-          </div>
-        </div>
-      </section>
-    </main>
+    <div class="main">
+      <header class="mobilebar">
+        <button class="icon-btn" id="menu-btn" aria-label="Open menu"></button>
+        <a class="brand" href="#/"><img class="brand-mark" src="/assets/favicon.svg" alt="" width="22" height="22"><span>procly</span></a>
+        <span class="mobile-server" id="mobile-server"></span>
+      </header>
+      <div class="banner" id="banner" role="alert" hidden></div>
+      <main class="view" id="view" tabindex="-1"></main>
+    </div>
   </div>
+
+  <dialog id="confirm" class="dialog">
+    <form method="dialog" id="confirm-form">
+      <div class="dialog-head">
+        <span class="dialog-icon" id="confirm-icon"></span>
+        <div>
+          <h3 id="confirm-title"></h3>
+          <p class="muted" id="confirm-text"></p>
+        </div>
+      </div>
+      <div class="field" id="confirm-type-wrap" hidden>
+        <label for="confirm-type" id="confirm-type-label"></label>
+        <input id="confirm-type" class="mono" autocomplete="off" spellcheck="false">
+      </div>
+      <div class="dialog-actions">
+        <button type="button" class="btn" id="confirm-cancel">Cancel</button>
+        <button value="ok" class="btn primary" id="confirm-ok"></button>
+      </div>
+    </form>
+  </dialog>
 
   <dialog id="new-dialog" class="dialog wide">
     <form id="new-form" method="dialog" novalidate>
-      <h3>New process</h3>
-      <p class="muted">Runs on <span id="new-host"></span> as the user running procly.</p>
-      <div class="field">
-        <label for="new-name">Name</label>
-        <input id="new-name" name="name" required pattern="[A-Za-z0-9][A-Za-z0-9._\-]{0,63}" placeholder="api" spellcheck="false" autocomplete="off">
+      <div class="dialog-head">
+        <span class="dialog-icon" id="new-icon"></span>
+        <div>
+          <h3>New process</h3>
+          <p class="muted">Runs on <span id="new-host" class="mono"></span> as the user running procly.</p>
+        </div>
       </div>
-      <div class="field">
-        <label for="new-command">Command</label>
-        <input id="new-command" name="command" required placeholder="node server.js" spellcheck="false" autocomplete="off" class="mono">
+      <div class="row2">
+        <div class="field">
+          <label for="new-name">Name</label>
+          <input id="new-name" name="name" required pattern="[A-Za-z0-9][A-Za-z0-9._\-]{0,63}" placeholder="api" spellcheck="false" autocomplete="off" class="mono">
+        </div>
+        <div class="field">
+          <label for="new-command">Command</label>
+          <input id="new-command" name="command" required placeholder="node server.js" spellcheck="false" autocomplete="off" class="mono">
+        </div>
       </div>
       <div class="field">
         <label for="new-cwd">Working directory</label>
@@ -139,18 +119,7 @@
       <p class="error" id="new-error" role="alert"></p>
       <div class="dialog-actions">
         <button type="button" class="btn" id="new-cancel">Cancel</button>
-        <button type="submit" class="btn primary" id="new-submit">Start</button>
-      </div>
-    </form>
-  </dialog>
-
-  <dialog id="confirm" class="dialog">
-    <form method="dialog">
-      <h3 id="confirm-title"></h3>
-      <p class="muted" id="confirm-text"></p>
-      <div class="dialog-actions">
-        <button value="cancel" class="btn">Cancel</button>
-        <button value="ok" class="btn danger-solid" id="confirm-ok">Delete</button>
+        <button type="submit" class="btn primary" id="new-submit">Start process</button>
       </div>
     </form>
   </dialog>

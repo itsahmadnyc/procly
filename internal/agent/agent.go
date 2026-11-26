@@ -26,6 +26,7 @@ import (
 	"github.com/itsahmadnyc/procly/internal/paths"
 	"github.com/itsahmadnyc/procly/internal/proc"
 	"github.com/itsahmadnyc/procly/internal/sse"
+	"github.com/itsahmadnyc/procly/internal/sysinfo"
 	"github.com/itsahmadnyc/procly/internal/version"
 )
 
@@ -134,6 +135,9 @@ func (a *agent) handlers() http.Handler {
 			return
 		}
 		writeJSON(w, http.StatusOK, proc.NewViews(infos))
+	})
+	mux.HandleFunc("GET /v1/system", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, sysinfo.Read())
 	})
 	mux.HandleFunc("POST /v1/processes/{name}/{action}", a.action)
 	mux.HandleFunc("POST /v1/save", func(w http.ResponseWriter, r *http.Request) {

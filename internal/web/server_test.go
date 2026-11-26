@@ -19,6 +19,7 @@ import (
 	"github.com/itsahmadnyc/procly/internal/logtail"
 	"github.com/itsahmadnyc/procly/internal/proc"
 	"github.com/itsahmadnyc/procly/internal/remote"
+	"github.com/itsahmadnyc/procly/internal/sysinfo"
 	"github.com/itsahmadnyc/procly/internal/tlsid"
 )
 
@@ -62,6 +63,10 @@ func (f *fakeBackend) Logs(ctx context.Context, name string, send func([]logtail
 	}
 	send([]logtail.Event{{Stream: "o", Line: "GET / 200"}})
 	return nil
+}
+
+func (f *fakeBackend) System(context.Context) (sysinfo.System, error) {
+	return sysinfo.System{Hostname: "prod-1", OS: "linux", CPUs: 4, MemTotal: 8 << 30}, nil
 }
 
 func (f *fakeBackend) recorded() []string {
@@ -151,7 +156,7 @@ func TestStaticPageAndSecurityHeaders(t *testing.T) {
 			t.Errorf("%s = %q, want %q", h, got, want)
 		}
 	}
-	for _, asset := range []string{"/assets/app.js", "/assets/style.css"} {
+	for _, asset := range []string{"/assets/app.js", "/assets/icons.js", "/assets/style.css", "/assets/favicon.svg"} {
 		if r := p.req(http.MethodGet, asset, "", false); r.code != http.StatusOK {
 			t.Errorf("%s: %d", asset, r.code)
 		}
@@ -167,6 +172,7 @@ func TestEverythingPrivateNeedsASession(t *testing.T) {
 		{http.MethodGet, "/api/servers/local/processes/api/logs"},
 		{http.MethodPost, "/api/servers/local/processes/api/restart"},
 		{http.MethodPost, "/api/servers/local/save"},
+		{http.MethodGet, "/api/servers/local/system"},
 	} {
 		if r := p.req(c.method, c.path, "", true); r.code != http.StatusUnauthorized {
 			t.Errorf("%s %s without session: %d", c.method, c.path, r.code)
@@ -308,6 +314,12 @@ func TestProcessesAndActions(t *testing.T) {
 
 	if r := p.req(http.MethodPost, "/api/servers/local/save", "", true); r.code != http.StatusOK || !strings.Contains(r.body, `"saved":2`) {
 		t.Fatalf("save: %d %s", r.code, r.body)
+	}
+	if r := p.req(http.MethodGet, "/api/servers/local/system", "", true); r.code != http.StatusOK || !strings.Contains(r.body, `"hostname":"prod-1"`) {
+		t.Fatalf("system: %d %s", r.code, r.body)
+	}
+	if r := p.req(http.MethodGet, "/api/servers/nope/system", "", true); r.code != http.StatusNotFound {
+		t.Fatalf("system for unknown server: %d", r.code)
 	}
 }
 

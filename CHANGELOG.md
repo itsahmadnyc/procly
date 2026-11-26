@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+A new logo and a redesigned web panel.
+
+- Branding: the keepalive-ring logo, colors and type are in `docs/brand`.
+- Web panel, rebuilt with a sidebar and separate pages: Overview, Processes, a
+  page per process (overview, logs, events, configuration), Servers and
+  Settings. Phone-friendly, with a light, dark or system theme.
+- Confirmations before restart, stop and delete; deleting asks for the name.
+- Every server shows load, memory, disk and uptime. Agents report them at
+  `/v1/system`; agents older than this version just show no host stats.
+- Each process remembers its last 40 events (starts, stops, crashes, give-ups,
+  failed health checks), with the stderr lines of the run that crashed.
+- Searchable logs that can be paused, wrapped and downloaded.
+
 ## v0.2.0
 
 Keeps servers tidy and tells you when something goes wrong.

@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/itsahmadnyc/procly/internal/hub"
+	"github.com/itsahmadnyc/procly/internal/sysinfo"
 	"github.com/itsahmadnyc/procly/internal/tlsid"
 )
 
@@ -265,5 +266,29 @@ func TestIdentityKeepsTokenHashOnly(t *testing.T) {
 	}
 	if reset.newToken == "" || reset.newToken == id.newToken || reset.fingerprint != id.fingerprint {
 		t.Fatal("--reset-token should change the token and keep the certificate")
+	}
+}
+
+func TestSystemNeedsTokenAndReportsHost(t *testing.T) {
+	hash, _ := hex.DecodeString(tlsid.TokenHash("right-token"))
+	a := &agent{host: "prod-1", tokenHash: hash, logger: log.New(io.Discard, "", 0)}
+	h := a.routes()
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/system", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("without token: %d", rec.Code)
+	}
+
+	req.Header.Set("Authorization", "Bearer right-token")
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	var sys sysinfo.System
+	if err := json.Unmarshal(rec.Body.Bytes(), &sys); rec.Code != http.StatusOK || err != nil {
+		t.Fatalf("with token: %d %v %s", rec.Code, err, rec.Body)
+	}
+	if sys.CPUs < 1 || sys.Hostname == "" || sys.Version == "" {
+		t.Errorf("system = %+v", sys)
 	}
 }

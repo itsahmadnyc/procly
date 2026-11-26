@@ -25,6 +25,28 @@ type View struct {
 	Health      Health   `json:"health,omitempty"`
 	HealthCheck string   `json:"health_check,omitempty"`
 	HealthError string   `json:"health_error,omitempty"`
+
+	// Settings, with defaults filled in, so the panel shows what really applies.
+	MaxRestarts    int    `json:"max_restarts"`
+	RestartDelayMs int64  `json:"restart_delay_ms"`
+	KillTimeoutMs  int64  `json:"kill_timeout_ms"`
+	LogMaxBytes    int64  `json:"log_max_bytes"` // 0: never rotated
+	LogKeep        int    `json:"log_keep"`
+	OutLog         string `json:"out_log"`
+	ErrLog         string `json:"err_log"`
+	HealthEveryMs  int64  `json:"health_every_ms,omitempty"`
+	HealthRetries  int    `json:"health_retries,omitempty"`
+
+	// Events is the recent history, newest first, with times as ages for
+	// the same reason as UptimeMs.
+	Events []ViewEvent `json:"events"`
+}
+
+type ViewEvent struct {
+	Kind     string `json:"kind"`
+	AgoMs    int64  `json:"ago_ms"`
+	ExitCode int    `json:"exit_code,omitempty"`
+	Detail   string `json:"detail,omitempty"`
 }
 
 func NewView(in Info) View {
@@ -36,6 +58,20 @@ func NewView(in Info) View {
 	}
 	if in.PID > 0 && !in.StartedAt.IsZero() {
 		v.UptimeMs = time.Since(in.StartedAt).Milliseconds()
+	}
+	v.MaxRestarts = in.Spec.MaxRestartsOrDefault()
+	v.RestartDelayMs = in.Spec.restartDelay().Milliseconds()
+	v.KillTimeoutMs = in.Spec.killTimeout().Milliseconds()
+	v.LogMaxBytes, v.LogKeep = in.Spec.logLimits()
+	v.OutLog, v.ErrLog = in.OutLog, in.ErrLog
+	if in.Spec.Health != "" {
+		_, every, _, retries := in.Spec.healthSettings()
+		v.HealthEveryMs, v.HealthRetries = every.Milliseconds(), retries
+	}
+	v.Events = make([]ViewEvent, 0, len(in.History))
+	for i := len(in.History) - 1; i >= 0; i-- {
+		h := in.History[i]
+		v.Events = append(v.Events, ViewEvent{Kind: h.Kind, AgoMs: time.Since(h.At).Milliseconds(), ExitCode: h.ExitCode, Detail: h.Detail})
 	}
 	for k := range in.Spec.Env {
 		if k != "PATH" {

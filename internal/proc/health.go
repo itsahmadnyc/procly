@@ -115,6 +115,7 @@ func (p *Process) healthLoop(cmd *exec.Cmd, exited chan struct{}, spec Spec) {
 				p.health = HealthUnhealthy
 				ev := Event{Kind: EventUnhealthy, Process: spec.Name, Restarts: p.restarts + 1,
 					Detail: fmt.Sprintf("%d failed checks in a row, last: %v", p.healthFails, err)}
+				p.noteLocked(EventUnhealthy, 0, ev.Detail)
 				p.mu.Unlock()
 				p.logger.Printf("%s: unhealthy after %d failed checks (%v), restarting", spec.Name, retries, err)
 				p.emit(ev)

@@ -1,8 +1,8 @@
-# procly
+<h1><img src="docs/brand/mark.svg" width="36" height="36" alt="" align="top"> procly</h1>
 
-[![npm](https://img.shields.io/npm/v/procly?color=2f855a)](https://www.npmjs.com/package/procly)
-[![release](https://img.shields.io/github/v/release/itsahmadnyc/procly?color=2f855a)](https://github.com/itsahmadnyc/procly/releases)
-[![license](https://img.shields.io/github/license/itsahmadnyc/procly?color=2f855a)](LICENSE)
+[![npm](https://img.shields.io/npm/v/procly?color=2eaa5c)](https://www.npmjs.com/package/procly)
+[![release](https://img.shields.io/github/v/release/itsahmadnyc/procly?color=2eaa5c)](https://github.com/itsahmadnyc/procly/releases)
+[![license](https://img.shields.io/github/license/itsahmadnyc/procly?color=2eaa5c)](LICENSE)
 
 A process manager for your servers. One small binary, no runtime needed.
 Runs Node, Python, Go, or any other command, restarts it when it crashes,
@@ -167,8 +167,13 @@ Colors follow your terminal theme. If it guesses light/dark wrong, set
 ## Web panel
 
 <picture>
-  <source media="(prefers-color-scheme: light)" srcset="docs/web-light.png">
-  <img alt="procly web panel: process table, CPU and memory graphs, live logs" src="docs/web-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="docs/web-overview-light.png">
+  <img alt="procly web panel overview: every server, what needs attention, recent events" src="docs/web-overview-dark.png">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: light)" srcset="docs/web-logs-light.png">
+  <img alt="procly web panel: one process with live, searchable logs" src="docs/web-logs-dark.png">
 </picture>
 
 ```sh
@@ -179,11 +184,24 @@ procly web --reset-password
 ```
 
 The first start prints a random password once; only a bcrypt hash is stored
-(`~/.procly/web.json`). The panel shows every process with live CPU and memory,
-streams logs, and can restart, stop, start and delete. **New process** (or `n`)
-starts a command on the panel's own server, as the user running procly; remote
-servers can't start new commands through their agents. Keys: `j`/`k` to move,
-`r` restart, `s` stop/start, `n` new process, `/` filter.
+(`~/.procly/web.json`).
+
+- **Overview**: every server at a glance with load, memory and disk, what needs
+  attention, and recent crashes and restarts across all of them.
+- **Processes**: filter, restart, stop and start, with a confirmation before
+  anything that interrupts a process. Deleting asks you to type its name.
+- **One process**: live CPU and memory charts, its restart policy and health
+  check, an event history with the last stderr lines of each crash, and
+  searchable logs you can pause, wrap and download.
+- **Servers**: every connected server, its host stats, and how to add another.
+  The switcher in the sidebar changes which server the panel is looking at.
+- **Settings**: light, dark or system theme, and how to set up alerts.
+
+**New process** (or `n`) starts a command on the panel's own server, as the user
+running procly; remote servers can't start new commands through their agents.
+Keys: `g` then `o`, `p` or `s` jumps to Overview, Processes or Servers; on a
+process, `r` restarts it, `s` stops or starts it and `l`, `e`, `c` open its logs,
+events and configuration; `[` and `]` change server and `/` filters or searches.
 
 It listens on localhost by default. To reach it from your laptop, either tunnel:
 
