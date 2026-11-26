@@ -1,0 +1,41 @@
+{
+  "name": "procly",
+  "version": "0.0.0",
+  "description": "A process manager for your servers in one small binary: auto-restart, logs, health checks, alerts, a terminal dashboard and a web panel. A lighter alternative to PM2.",
+  "keywords": [
+    "process manager",
+    "pm2",
+    "daemon",
+    "supervisor",
+    "process monitor",
+    "restart",
+    "logs",
+    "health check",
+    "devops",
+    "server"
+  ],
+  "homepage": "https://github.com/itsahmadnyc/procly#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/itsahmadnyc/procly.git"
+  },
+  "bugs": "https://github.com/itsahmadnyc/procly/issues",
+  "license": "MIT",
+  "author": "Muhammad Ahmad",
+  "bin": {
+    "procly": "bin/procly.js"
+  },
+  "files": [
+    "bin/procly.js",
+    "README.md",
+    "LICENSE"
+  ],
+  "os": [
+    "linux",
+    "darwin"
+  ],
+  "engines": {
+    "node": ">=16"
+  },
+  "optionalDependencies": {}
+}

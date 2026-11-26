@@ -40,6 +40,13 @@ Pin a version with `PROCLY_VERSION=0.1.0`, or pick the folder with
 `PROCLY_INSTALL_DIR`. Prefer to look first? Read [install.sh](install.sh), or
 download an archive from [Releases](https://github.com/itsahmadnyc/procly/releases).
 
+With npm (the right binary for your system comes as an optional dependency;
+Node is only used to start it):
+
+```sh
+npm install -g procly
+```
+
 With Go (1.21 or newer fetches the required toolchain itself):
 
 ```sh
