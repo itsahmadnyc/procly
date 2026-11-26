@@ -21,6 +21,15 @@ type Manager struct {
 	nextID int
 	logDir string
 	logger *log.Logger
+	events func(Event)
+}
+
+// OnEvent registers a function to call (in its own goroutine) for crashes,
+// give-ups and failed health checks. Call it before starting processes.
+func (m *Manager) OnEvent(fn func(Event)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.events = fn
 }
 
 func NewManager(logDir string, logger *log.Logger) *Manager {
@@ -35,7 +44,7 @@ func (m *Manager) Start(spec Spec) (Info, error) {
 	m.mu.Lock()
 	p, exists := m.procs[spec.Name]
 	if !exists {
-		p = newProcess(m.nextID, spec, m.logDir, m.logger)
+		p = newProcess(m.nextID, spec, m.logDir, m.logger, m.events)
 		m.nextID++
 		m.procs[spec.Name] = p
 	}

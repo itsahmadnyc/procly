@@ -77,6 +77,44 @@ procly ls
 Files are run by extension (`.js` with node, `.py` with python3, `.sh` with bash, ...).
 Arguments for your script go after `--`: `procly start app.js -- --port 3000`.
 
+## Health checks
+
+```sh
+procly start server.js --name api --health http://127.0.0.1:3000/health
+procly start redis-server --health tcp://127.0.0.1:6379
+```
+
+After a 10s grace period procly checks every 10s. Three failures in a row
+restart the process; `procly ls`, `procly describe` and the web panel show
+`healthy` or `unhealthy`, with the last error. Tune it per app in `procly.yml`
+(`health_interval`, `health_timeout`, `health_retries`, `health_grace`).
+
+## Log rotation
+
+Logs rotate at 10 MB by default, keeping three old files
+(`~/.procly/logs/api-out.log.1`, `.2`, `.3`). Change it with
+`--log-max-size 50MB --log-keep 5`, or in `procly.yml`. Rotation copies the log
+and empties it in place, so running processes keep writing without a restart.
+
+## Alerts
+
+Get a message when a process crashes, when procly gives up restarting it, or
+when its health check fails:
+
+```sh
+procly alerts telegram --token <bot token> --chat <chat id>
+procly alerts slack --webhook https://hooks.slack.com/services/...
+procly alerts           # what is set up
+procly alerts test
+procly alerts off
+```
+
+A test message goes out first; settings are saved only if it arrives. A crash
+loop sends one message per process every five minutes, with a count of the
+ones it skipped. Tokens are kept in `~/.procly/alerts.json` (mode 600). For
+Telegram, create a bot with @BotFather, send it a message, and read your chat
+id from `https://api.telegram.org/bot<token>/getUpdates`.
+
 ## Live dashboard
 
 `procly monit` opens a full-screen view of every process with CPU and memory
@@ -111,8 +149,10 @@ procly web --reset-password
 
 The first start prints a random password once; only a bcrypt hash is stored
 (`~/.procly/web.json`). The panel shows every process with live CPU and memory,
-streams logs, and can restart, stop, start and delete. Keys: `j`/`k` to move,
-`r` restart, `s` stop/start, `/` filter.
+streams logs, and can restart, stop, start and delete. **New process** (or `n`)
+starts a command on the panel's own server, as the user running procly; remote
+servers can't start new commands through their agents. Keys: `j`/`k` to move,
+`r` restart, `s` stop/start, `n` new process, `/` filter.
 
 It listens on localhost by default. To reach it from your laptop, either tunnel:
 
@@ -243,6 +283,13 @@ procly start procly.yml
 | `max_restarts` | `15` | quick crashes in a row before giving up |
 | `restart_delay_ms` | `1000` | doubles per crash, capped at 30s |
 | `kill_timeout_ms` | `5000` | time between SIGTERM and SIGKILL |
+| `log_max_size` | `10MB` | rotate logs past this size; `0` turns rotation off |
+| `log_keep` | `3` | old log files to keep (`app-out.log.1`, `.2`, …) |
+| `health` | | `http(s)://…` (must answer 2xx/3xx) or `tcp://host:port` |
+| `health_interval` | `10s` | time between checks |
+| `health_timeout` | `3s` | how long one check may take |
+| `health_retries` | `3` | failures in a row before a restart |
+| `health_grace` | `10s` | wait after start before the first check |
 
 ## How it works
 
@@ -278,7 +325,8 @@ macOS: process groups, `ps` and `/bin/sh` differ between them.
 - [x] Interactive terminal UI (`procly monit`)
 - [x] Web panel, embedded in the binary
 - [x] Connect several servers to one panel
-- [ ] Log rotation, health checks, alerts, deploy from git
+- [x] Log rotation, health checks, Telegram/Slack alerts, start processes from the panel
+- [ ] Deploy from git, cluster mode
 
 ## License
 

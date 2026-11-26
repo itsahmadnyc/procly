@@ -93,6 +93,15 @@ func printList(w io.Writer, infos []proc.View, server string) {
 		return
 	}
 	headers := []string{"id", "name", "status", "pid", "uptime", "restarts", "cpu", "memory"}
+	withHealth := false
+	for _, in := range infos {
+		if in.HealthCheck != "" {
+			withHealth = true
+		}
+	}
+	if withHealth {
+		headers = append(headers, "health")
+	}
 	rows := make([][]string, len(infos))
 	counts := map[proc.Status]int{}
 	for i, in := range infos {
@@ -105,6 +114,13 @@ func printList(w io.Writer, infos []proc.View, server string) {
 			mem = fmtBytes(in.Memory)
 		}
 		rows[i] = []string{fmt.Sprint(in.ID), in.Name, statusLabel(in.Status), pid, up, fmt.Sprint(in.Restarts), cpu, mem}
+		if withHealth {
+			h := string(in.Health)
+			if in.HealthCheck == "" || h == "" {
+				h = "-"
+			}
+			rows[i] = append(rows[i], h)
+		}
 	}
 	right := map[int]bool{0: true, 3: true, 5: true, 6: true, 7: true}
 	fmt.Fprintln(w)
@@ -120,6 +136,14 @@ func printList(w io.Writer, infos []proc.View, server string) {
 			}
 			return s
 		case 0, 3:
+			return dim(s)
+		case 8:
+			switch infos[row].Health {
+			case proc.HealthHealthy:
+				return green(s)
+			case proc.HealthUnhealthy:
+				return red(s)
+			}
 			return dim(s)
 		}
 		return s

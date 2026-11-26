@@ -22,6 +22,9 @@ type View struct {
 	Cwd         string   `json:"cwd"`
 	AutoRestart bool     `json:"autorestart"`
 	EnvKeys     []string `json:"env_keys"`
+	Health      Health   `json:"health,omitempty"`
+	HealthCheck string   `json:"health_check,omitempty"`
+	HealthError string   `json:"health_error,omitempty"`
 }
 
 func NewView(in Info) View {
@@ -29,7 +32,7 @@ func NewView(in Info) View {
 		ID: in.ID, Name: in.Name, Status: in.Status, PID: in.PID, Restarts: in.Restarts,
 		ExitCode: in.ExitCode, CPU: in.CPU, Memory: in.Memory,
 		Command: in.Spec.Command, Cwd: in.Spec.Cwd, AutoRestart: in.Spec.ShouldAutoRestart(),
-		EnvKeys: []string{},
+		EnvKeys: []string{}, Health: in.Health, HealthCheck: in.Spec.Health, HealthError: in.HealthErr,
 	}
 	if in.PID > 0 && !in.StartedAt.IsZero() {
 		v.UptimeMs = time.Since(in.StartedAt).Milliseconds()

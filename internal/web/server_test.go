@@ -30,6 +30,7 @@ type fakeBackend struct {
 	actErr  error
 	actions []string
 	saved   int
+	started []proc.Spec
 }
 
 func (f *fakeBackend) List(context.Context) ([]proc.View, error) {

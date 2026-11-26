@@ -278,6 +278,22 @@ input[type=password], input[type=search] {
 .dialog h3 { font-size: 15px; margin-bottom: 6px; }
 .dialog p { margin: 0 0 18px; font-size: 13px; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.dialog.wide { width: min(480px, calc(100% - 32px)); }
+.field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 12px; }
+.field label { font-size: 12.5px; font-weight: 500; }
+.field label .muted { font-weight: 400; margin-left: 4px; }
+.field input, .field textarea {
+  width: 100%; padding: 7px 10px;
+  border: 1px solid var(--border-strong); border-radius: 6px;
+  background: var(--surface); color: var(--text); font: 13px var(--sans);
+}
+.field textarea { resize: vertical; }
+.field .mono, .field input.mono, .field textarea.mono { font-family: var(--mono); font-size: 12.5px; }
+.field input:focus-visible, .field textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 0; }
+#new-form .check { margin: 2px 0 12px; }
+#new-form .error { margin: 0 0 12px; }
+.facts dd.healthy { color: var(--green); }
+.facts dd.unhealthy { color: var(--red); }
 
 .toast {
   position: fixed; left: 20px; bottom: 20px; z-index: 10;
@@ -304,6 +320,7 @@ input[type=password], input[type=search] {
   .procs th, .procs td { padding-left: 10px; padding-right: 10px; }
   .filter { width: 120px; }
   .filter-key, .btn kbd { display: none; }
+  #new-btn { padding: 0 8px; }
   .metrics { grid-template-columns: 1fr; }
   .detail-actions { width: 100%; }
   .detail-actions .btn { flex: 1; justify-content: center; }

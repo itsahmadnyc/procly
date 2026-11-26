@@ -183,3 +183,33 @@ func TestRenderTableAligns(t *testing.T) {
 		t.Fatalf("left column: %q", lines[2])
 	}
 }
+
+func TestBuildSpecHealthAndRotation(t *testing.T) {
+	dir := t.TempDir()
+	startFlags := flagSet{
+		valued: set("name", "cwd", "env", "max-restarts", "health", "log-max-size", "log-keep"),
+		bools:  set("no-autorestart"),
+		alias:  map[string]string{"n": "name", "e": "env"},
+	}
+	a, err := parse([]string{"--cwd", dir, "sleep 30", "--health", "http://127.0.0.1:3000/health", "--log-max-size", "50MB", "--log-keep", "0"}, startFlags)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := buildSpec(a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Health != "http://127.0.0.1:3000/health" || s.LogMaxSize != "50MB" || s.LogKeep == nil || *s.LogKeep != 0 {
+		t.Fatalf("spec: %+v", s)
+	}
+	for _, bad := range [][]string{
+		{"sleep 1", "--health", "localhost:3000"},
+		{"sleep 1", "--log-max-size", "huge"},
+		{"sleep 1", "--log-keep", "-1"},
+	} {
+		a, _ := parse(append([]string{"--cwd", dir}, bad...), startFlags)
+		if _, err := buildSpec(a); err == nil {
+			t.Errorf("%v accepted", bad)
+		}
+	}
+}

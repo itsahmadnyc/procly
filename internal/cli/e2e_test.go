@@ -245,3 +245,43 @@ func TestCLIServerInviteStoresOnlyAHash(t *testing.T) {
 	contains(t, c.ok("server", "invite", "office-1"), "re-invited office-1")
 	contains(t, c.ok("server", "rm", "office-1"), "removed office-1")
 }
+
+func TestCLIHealthCheckRestartsAndShows(t *testing.T) {
+	c := newCLI(t)
+	// Port 1 never accepts connections, so every check fails.
+	c.file("procly.yml", `apps:
+  - name: api
+    command: sleep 30
+    health: tcp://127.0.0.1:1
+    health_grace: 0.2
+    health_interval: 0.2
+    health_retries: 2
+    log_max_size: 5MB
+    log_keep: 2
+`)
+	c.ok("start", "procly.yml")
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		out := c.ok("describe", "api")
+		if strings.Contains(out, "restarts     ") && !strings.Contains(out, "restarts     0") {
+			contains(t, out, "tcp://127.0.0.1:1", "log rotation at 5.0 MB, keep 2")
+			contains(t, c.ok("ls"), "health")
+			return
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	t.Fatalf("a failing health check never restarted the process:\n%s", c.ok("describe", "api"))
+}
+
+func TestCLIAlertsCommand(t *testing.T) {
+	c := newCLI(t)
+	contains(t, c.ok("alerts"), "No alerts set up", "procly alerts telegram")
+	contains(t, c.fails("alerts", "telegram"), "--token", "@BotFather")
+	contains(t, c.fails("alerts", "slack", "--webhook", "http://insecure.example.com/x"), "https://hooks.slack.com")
+	contains(t, c.fails("alerts", "test"), "no alerts set up")
+	// A token that can't send a test message is not saved.
+	out := c.fails("alerts", "slack", "--webhook", "https://127.0.0.1:1/hook")
+	contains(t, out, "Nothing was saved")
+	contains(t, c.ok("alerts"), "No alerts set up")
+	contains(t, c.ok("alerts", "off"), "turned off all alerts")
+}

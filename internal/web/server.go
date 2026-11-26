@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -22,6 +23,7 @@ import (
 	"github.com/itsahmadnyc/procly/internal/client"
 	"github.com/itsahmadnyc/procly/internal/logtail"
 	"github.com/itsahmadnyc/procly/internal/paths"
+	"github.com/itsahmadnyc/procly/internal/proc"
 	"github.com/itsahmadnyc/procly/internal/remote"
 	"github.com/itsahmadnyc/procly/internal/sse"
 	"github.com/itsahmadnyc/procly/internal/version"
@@ -127,6 +129,7 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("POST /api/servers/{server}/processes/{name}/{action}", s.private(s.csrf(s.withBackend(s.action))))
 	mux.HandleFunc("GET /api/servers/{server}/processes/{name}/logs", s.private(s.withBackend(s.logs)))
 	mux.HandleFunc("POST /api/servers/{server}/save", s.private(s.csrf(s.withBackend(s.save))))
+	mux.HandleFunc("POST /api/servers/{server}/processes", s.private(s.csrf(s.withBackend(s.start))))
 
 	return secureHeaders(mux)
 }
@@ -223,7 +226,54 @@ func (s *server) logout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) info(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"host": s.host, "version": version.Version})
+	home, _ := os.UserHomeDir()
+	writeJSON(w, http.StatusOK, map[string]any{"host": s.host, "version": version.Version, "home": home})
+}
+
+type startRequest struct {
+	Name        string            `json:"name"`
+	Command     string            `json:"command"`
+	Cwd         string            `json:"cwd"`
+	Env         map[string]string `json:"env"`
+	AutoRestart *bool             `json:"autorestart"`
+	Health      string            `json:"health"`
+}
+
+// start runs a new command on this machine. The panel is an admin tool, so
+// a signed-in user may start anything the panel's own user could run.
+func (s *server) start(w http.ResponseWriter, r *http.Request, b backend, server string) {
+	st, ok := b.(starter)
+	if !ok || server != remote.LocalName {
+		writeJSON(w, http.StatusForbidden, map[string]string{
+			"error": "new processes can only be started on this server; agents don't start new commands. Run procly start on " + server + ".",
+		})
+		return
+	}
+	var req startRequest
+	if err := json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		return
+	}
+	spec := proc.Spec{
+		Name: strings.TrimSpace(req.Name), Command: strings.TrimSpace(req.Command), Cwd: strings.TrimSpace(req.Cwd),
+		Env: req.Env, AutoRestart: req.AutoRestart, Health: strings.TrimSpace(req.Health),
+	}
+	if spec.Env == nil {
+		spec.Env = map[string]string{}
+	}
+	// Like the CLI: give the process the PATH procly itself was started with.
+	if _, set := spec.Env["PATH"]; !set {
+		spec.Env["PATH"] = os.Getenv("PATH")
+	}
+	if err := spec.Validate(); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if err := st.Start(r.Context(), spec); err != nil {
+		writeError(w, server, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]string{"name": spec.Name})
 }
 
 type backendHandler func(w http.ResponseWriter, r *http.Request, b backend, server string)

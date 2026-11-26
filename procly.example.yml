@@ -4,6 +4,8 @@ apps:
     cwd: ./api
     env:
       PORT: 3000
+    health: http://127.0.0.1:3000/health
+    log_max_size: 50MB
   - name: worker
     command: python3 worker.py
     max_restarts: 5

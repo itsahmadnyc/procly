@@ -40,6 +40,9 @@ Processes
   monit                         Live dashboard in the terminal     alias: dash
   web                           Web panel (--addr, --port, --reset-password)
 
+Alerts
+  alerts                        Telegram/Slack messages on crashes and failed health checks
+
 Servers
   agent                         Let a hub reach this server (--port, --reset-token)
   server add <name> <url> ...   Connect a reachable server's agent to this one
@@ -64,6 +67,9 @@ Start options
   -e, --env KEY=VALUE           Environment variable, repeatable
       --no-autorestart          Leave the process down when it exits
       --max-restarts <n>        Give up after n quick crashes (default 15)
+      --health <url>            http(s)://… or tcp://host:port; restart after 3 failed checks
+      --log-max-size <size>     Rotate logs past this size (default 10MB, 0 = off)
+      --log-keep <n>            Old log files to keep (default 3)
   -- <args>                     Everything after -- goes to the script
 
 Other servers
@@ -118,6 +124,8 @@ func Run(argv []string) int {
 		err = cmdResurrect()
 	case "startup":
 		err = cmdStartup()
+	case "alerts", "alert":
+		err = cmdAlerts(rest)
 	case "kill":
 		err = cmdKill()
 	case "daemon":
@@ -183,7 +191,7 @@ func connect() (*client.Client, bool) {
 
 func cmdStart(argv []string) error {
 	a, err := parse(argv, withServer(flagSet{
-		valued: set("name", "cwd", "env", "max-restarts"),
+		valued: set("name", "cwd", "env", "max-restarts", "health", "log-max-size", "log-keep"),
 		bools:  set("no-autorestart"),
 		alias:  map[string]string{"n": "name", "e": "env"},
 	}))
@@ -322,6 +330,24 @@ func buildSpec(a args) (proc.Spec, error) {
 			return spec, fmt.Errorf("--max-restarts must be a positive number")
 		}
 		spec.MaxRestarts = n
+	}
+	spec.Health = a.get("health")
+	spec.LogMaxSize = a.get("log-max-size")
+	if v := a.get("log-keep"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 {
+			return spec, fmt.Errorf("--log-keep must be 0 or more")
+		}
+		spec.LogKeep = &n
+	}
+	// Catch typos here rather than as a daemon error.
+	check := spec
+	check.Cwd = "/"
+	if check.Name == "" || !proc.ValidName(check.Name) {
+		check.Name = "x"
+	}
+	if err := check.Validate(); err != nil {
+		return spec, err
 	}
 	return spec, nil
 }
@@ -483,8 +509,29 @@ func cmdDescribe(argv []string) error {
 	rows = append(rows,
 		[2]string{"restarts", fmt.Sprint(in.Restarts)},
 		[2]string{"autorestart", auto},
+	)
+	if in.Spec.Health != "" {
+		h := string(in.Health)
+		if h == "" {
+			h = "not running"
+		}
+		rows = append(rows, [2]string{"health", h + "  " + in.Spec.Health})
+		if in.HealthErr != "" {
+			rows = append(rows, [2]string{"", "last check: " + in.HealthErr})
+		}
+	}
+	rotation := "off"
+	if max, err := proc.ParseSize(in.Spec.LogMaxSize); err == nil && max > 0 {
+		keep := 3
+		if in.Spec.LogKeep != nil {
+			keep = *in.Spec.LogKeep
+		}
+		rotation = fmt.Sprintf("at %s, keep %d", fmtBytes(max), keep)
+	}
+	rows = append(rows,
 		[2]string{"stdout", tilde(in.OutLog)},
 		[2]string{"stderr", tilde(in.ErrLog)},
+		[2]string{"log rotation", rotation},
 	)
 	keys := make([]string, 0, len(in.Spec.Env))
 	for k := range in.Spec.Env {

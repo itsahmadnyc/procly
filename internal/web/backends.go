@@ -19,7 +19,18 @@ type backend interface {
 	Logs(ctx context.Context, name string, send func([]logtail.Event) bool) error
 }
 
+// starter is a backend that can start new commands. Only the local one is:
+// agents refuse new commands on purpose.
+type starter interface {
+	Start(ctx context.Context, spec proc.Spec) error
+}
+
 type localBackend struct{ c *client.Client }
+
+func (l localBackend) Start(_ context.Context, spec proc.Spec) error {
+	_, err := l.c.Start(spec)
+	return err
+}
 
 func (l localBackend) List(context.Context) ([]proc.View, error) {
 	infos, err := l.c.List()

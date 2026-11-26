@@ -13,6 +13,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/itsahmadnyc/procly/internal/logtail"
 )
 
 type Status string
@@ -43,6 +45,8 @@ type Info struct {
 	Memory    int64     `json:"memory"`
 	OutLog    string    `json:"out_log"`
 	ErrLog    string    `json:"err_log"`
+	Health    Health    `json:"health,omitempty"`
+	HealthErr string    `json:"health_error,omitempty"`
 	Spec      Spec      `json:"spec"`
 }
 
@@ -64,9 +68,14 @@ type Process struct {
 	outLog    string
 	errLog    string
 	logger    *log.Logger
+
+	health      Health
+	healthFails int
+	healthErr   string
+	events      func(Event) // may be nil
 }
 
-func newProcess(id int, spec Spec, logDir string, logger *log.Logger) *Process {
+func newProcess(id int, spec Spec, logDir string, logger *log.Logger, events func(Event)) *Process {
 	return &Process{
 		id:     id,
 		spec:   spec,
@@ -74,6 +83,7 @@ func newProcess(id int, spec Spec, logDir string, logger *log.Logger) *Process {
 		outLog: filepath.Join(logDir, spec.Name+"-out.log"),
 		errLog: filepath.Join(logDir, spec.Name+"-error.log"),
 		logger: logger,
+		events: events,
 	}
 }
 
@@ -114,6 +124,11 @@ func (p *Process) launchLocked() error {
 	p.status = StatusOnline
 	p.stopping = false
 	p.exited = exited
+	p.health, p.healthFails, p.healthErr = "", 0, ""
+	if p.spec.Health != "" {
+		p.health = HealthStarting
+		go p.healthLoop(cmd, exited, p.spec)
+	}
 	p.logger.Printf("%s: started pid=%d", p.spec.Name, p.pid)
 	go p.wait(cmd, exited)
 	return nil
@@ -131,6 +146,7 @@ func (p *Process) wait(cmd *exec.Cmd, exited chan struct{}) {
 	}
 	ranFor := time.Since(p.startedAt)
 	p.cmd, p.pid, p.exited, p.exitCode = nil, 0, nil, code
+	p.health, p.healthFails = "", 0
 
 	if p.stopping {
 		p.stopping = false
@@ -145,6 +161,7 @@ func (p *Process) wait(cmd *exec.Cmd, exited chan struct{}) {
 			p.status = StatusStopped
 		} else {
 			p.status = StatusErrored
+			p.emit(Event{Kind: EventErrored, Process: p.spec.Name, ExitCode: code, Restarts: p.restarts, Detail: p.lastErrLines()})
 		}
 		return
 	}
@@ -155,12 +172,21 @@ func (p *Process) wait(cmd *exec.Cmd, exited chan struct{}) {
 	if p.crashes > p.spec.MaxRestartsOrDefault() {
 		p.status = StatusErrored
 		p.logger.Printf("%s: crashed %d times in a row, giving up", p.spec.Name, p.crashes-1)
+		p.emit(Event{Kind: EventErrored, Process: p.spec.Name, ExitCode: code, Restarts: p.restarts,
+			Detail: fmt.Sprintf("gave up after %d quick crashes\n%s", p.crashes-1, p.lastErrLines())})
 		return
 	}
 	delay := backoff(p.spec.restartDelay(), p.crashes)
 	p.status = StatusWaiting
 	p.timer = time.AfterFunc(delay, p.autoRestart)
 	p.logger.Printf("%s: restarting in %s", p.spec.Name, delay)
+	p.emit(Event{Kind: EventCrashed, Process: p.spec.Name, ExitCode: code, Restarts: p.restarts + 1, Retry: delay, Detail: p.lastErrLines()})
+}
+
+// lastErrLines returns the end of the stderr log, for alerts.
+func (p *Process) lastErrLines() string {
+	lines, _ := logtail.Tail(p.errLog, 5)
+	return strings.Join(lines, "\n")
 }
 
 func (p *Process) autoRestart() {
@@ -222,15 +248,17 @@ func (p *Process) Info() Info {
 
 func (p *Process) infoLocked() Info {
 	info := Info{
-		ID:       p.id,
-		Name:     p.spec.Name,
-		Status:   p.status,
-		PID:      p.pid,
-		Restarts: p.restarts,
-		ExitCode: p.exitCode,
-		OutLog:   p.outLog,
-		ErrLog:   p.errLog,
-		Spec:     p.spec,
+		ID:        p.id,
+		Name:      p.spec.Name,
+		Status:    p.status,
+		PID:       p.pid,
+		Restarts:  p.restarts,
+		ExitCode:  p.exitCode,
+		OutLog:    p.outLog,
+		ErrLog:    p.errLog,
+		Health:    p.health,
+		HealthErr: p.healthErr,
+		Spec:      p.spec,
 	}
 	if p.cmd != nil {
 		info.StartedAt = p.startedAt

@@ -124,6 +124,7 @@ async function startApp() {
   try {
     const info = await api("GET", "/api/info");
     state.host = info.host || "";
+    state.home = info.home || "/";
     $("host").textContent = state.host;
   } catch (err) {
     if (err instanceof AuthError) return showLogin();
@@ -170,6 +171,7 @@ function renderServers() {
   const nav = $("servers");
   const multi = state.servers.length > 1;
   nav.hidden = !multi;
+  $("new-btn").hidden = state.server !== "local";
   $("host").textContent = multi ? serverLabel(state.server) : state.host;
   document.title = `procly · ${serverLabel(state.server) || "procly"}`;
   if (!multi) return;
@@ -368,6 +370,12 @@ function renderDetail() {
   }
   add("restarts", String(p.restarts));
   add("autorestart", p.autorestart ? "on" : "off");
+  if (p.health_check) {
+    add("health", (p.health || "not running") + " · " + p.health_check, true);
+    const dd = facts.lastElementChild.querySelector("dd");
+    if (p.health === "healthy" || p.health === "unhealthy") dd.classList.add(p.health);
+    if (p.health_error) add("last check", p.health_error, true);
+  }
   add("cwd", p.cwd, true);
   if (p.env_keys.length) add("env", p.env_keys.join(", "), true);
 
@@ -473,6 +481,67 @@ function toast(msg, isErr) {
   toastTimer = setTimeout(() => { t.hidden = true; }, isErr ? 6000 : 3000);
 }
 
+// ---------- new process ----------
+
+function openNewProcess() {
+  if (state.server !== "local") return;
+  const form = $("new-form");
+  form.reset();
+  $("new-cwd").value = state.home || "/";
+  $("new-host").textContent = state.host || "this server";
+  $("new-error").textContent = "";
+  $("new-dialog").showModal();
+  $("new-name").focus();
+}
+
+function parseEnv(text) {
+  const env = {};
+  for (const raw of text.split("\n")) {
+    const line = raw.trim();
+    if (!line || line.startsWith("#")) continue;
+    const i = line.indexOf("=");
+    if (i <= 0) throw new Error(`Environment line "${line}" needs KEY=value.`);
+    env[line.slice(0, i).trim()] = line.slice(i + 1);
+  }
+  return env;
+}
+
+$("new-btn").addEventListener("click", openNewProcess);
+$("new-cancel").addEventListener("click", () => $("new-dialog").close());
+
+$("new-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const err = $("new-error");
+  err.textContent = "";
+  const name = $("new-name").value.trim();
+  const command = $("new-command").value.trim();
+  if (!name || !command) {
+    err.textContent = "Name and command are required.";
+    return;
+  }
+  let env;
+  try { env = parseEnv($("new-env").value); } catch (ex) { err.textContent = ex.message; return; }
+  const btn = $("new-submit");
+  btn.disabled = true;
+  try {
+    await api("POST", `${base()}/processes`, {
+      name, command, env,
+      cwd: $("new-cwd").value.trim(),
+      health: $("new-health").value.trim(),
+      autorestart: $("new-restart").checked,
+    });
+    $("new-dialog").close();
+    toast(`Started ${name}`);
+    state.sel = name;
+    await refresh();
+  } catch (ex) {
+    if (ex instanceof AuthError) return showLogin("Your session ended. Sign in again.");
+    err.textContent = ex.message;
+  } finally {
+    btn.disabled = false;
+  }
+});
+
 // ---------- logs ----------
 
 function closeStream() {
@@ -550,7 +619,7 @@ $("filter").addEventListener("input", (e) => {
 });
 
 document.addEventListener("keydown", (e) => {
-  if ($("app").hidden || $("confirm").open) return;
+  if ($("app").hidden || $("confirm").open || $("new-dialog").open) return;
   const t = e.target;
   const typing = t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement;
   if (typing) {
@@ -562,6 +631,7 @@ document.addEventListener("keydown", (e) => {
   const i = list.findIndex((p) => p.name === state.sel);
   switch (e.key) {
     case "/": e.preventDefault(); $("filter").focus(); break;
+    case "n": e.preventDefault(); openNewProcess(); break;
     case "j": case "ArrowDown":
       if (list.length) { e.preventDefault(); select(list[Math.min(i + 1, list.length - 1)].name); }
       break;

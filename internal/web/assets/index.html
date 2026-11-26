@@ -43,6 +43,7 @@
           <h2>Processes</h2>
           <input id="filter" class="filter" type="search" placeholder="Filter" aria-label="Filter processes" spellcheck="false">
           <kbd class="filter-key">/</kbd>
+          <button class="btn small" id="new-btn" title="Start a new process on this server">New process</button>
         </div>
         <div class="table-wrap">
           <table class="procs">
@@ -109,6 +110,39 @@
       </section>
     </main>
   </div>
+
+  <dialog id="new-dialog" class="dialog wide">
+    <form id="new-form" method="dialog" novalidate>
+      <h3>New process</h3>
+      <p class="muted">Runs on <span id="new-host"></span> as the user running procly.</p>
+      <div class="field">
+        <label for="new-name">Name</label>
+        <input id="new-name" name="name" required pattern="[A-Za-z0-9][A-Za-z0-9._\-]{0,63}" placeholder="api" spellcheck="false" autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="new-command">Command</label>
+        <input id="new-command" name="command" required placeholder="node server.js" spellcheck="false" autocomplete="off" class="mono">
+      </div>
+      <div class="field">
+        <label for="new-cwd">Working directory</label>
+        <input id="new-cwd" name="cwd" required spellcheck="false" autocomplete="off" class="mono">
+      </div>
+      <div class="field">
+        <label for="new-env">Environment <span class="muted">one KEY=value per line, optional</span></label>
+        <textarea id="new-env" name="env" rows="3" spellcheck="false" placeholder="PORT=3000" class="mono"></textarea>
+      </div>
+      <div class="field">
+        <label for="new-health">Health check <span class="muted">optional</span></label>
+        <input id="new-health" name="health" spellcheck="false" autocomplete="off" placeholder="http://127.0.0.1:3000/health" class="mono">
+      </div>
+      <label class="check"><input type="checkbox" id="new-restart" checked> Restart when it crashes</label>
+      <p class="error" id="new-error" role="alert"></p>
+      <div class="dialog-actions">
+        <button type="button" class="btn" id="new-cancel">Cancel</button>
+        <button type="submit" class="btn primary" id="new-submit">Start</button>
+      </div>
+    </form>
+  </dialog>
 
   <dialog id="confirm" class="dialog">
     <form method="dialog">

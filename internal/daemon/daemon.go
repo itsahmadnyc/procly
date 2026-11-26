@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/itsahmadnyc/procly/internal/alerts"
 	"github.com/itsahmadnyc/procly/internal/paths"
 	"github.com/itsahmadnyc/procly/internal/proc"
 	"github.com/itsahmadnyc/procly/internal/version"
@@ -43,6 +44,8 @@ func Run(resurrect bool) error {
 	defer os.Remove(paths.PidFile())
 
 	mgr := proc.NewManager(paths.LogDir(), logger)
+	host, _ := os.Hostname()
+	mgr.OnEvent(alerts.NewNotifier(host, logger).Handle)
 	quit := make(chan struct{})
 	var once sync.Once
 	shutdown := func() { once.Do(func() { close(quit) }) }
@@ -53,6 +56,7 @@ func Run(resurrect bool) error {
 	signal.Ignore(syscall.SIGHUP)
 
 	done := make(chan struct{})
+	go rotateLoop(quit, mgr, logger)
 	go func() {
 		defer close(done)
 		select {
@@ -85,6 +89,25 @@ func Run(resurrect bool) error {
 	<-done
 	logger.Printf("stopped")
 	return err
+}
+
+// rotateLoop keeps process logs and the daemon's own log under their size limits.
+func rotateLoop(quit <-chan struct{}, m *proc.Manager, logger *log.Logger) {
+	tick := time.NewTicker(30 * time.Second)
+	defer tick.Stop()
+	for {
+		select {
+		case <-quit:
+			return
+		case <-tick.C:
+		}
+		m.RotateLogs()
+		if rotated, err := proc.RotateFile(paths.DaemonLog(), 10<<20, 3); err != nil {
+			logger.Printf("rotating daemon log: %v", err)
+		} else if rotated {
+			logger.Printf("rotated %s", paths.DaemonLog())
+		}
+	}
 }
 
 func newHandler(m *proc.Manager, shutdown func()) http.Handler {

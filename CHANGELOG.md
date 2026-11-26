@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- Log rotation: logs rotate at 10 MB and keep 3 old files by default
+  (`--log-max-size`, `--log-keep`, `log_max_size`, `log_keep`), without
+  restarting the process. The daemon's own log rotates too.
+- Health checks: `--health http://…` or `tcp://host:port`; three failures in a
+  row restart the process. Shown in `ls`, `describe` and the web panel.
+- Alerts: `procly alerts telegram|slack|test|off`. Messages on crashes (at most
+  one per process every 5 minutes), give-ups and failed health checks.
+- Web panel: **New process** form (`n`) to start a command on the panel's server.
+
 ## v0.1.0 — first release
 
 procly is a process manager for your servers: one small Go binary that runs
