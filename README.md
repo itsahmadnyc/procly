@@ -404,6 +404,9 @@ State lives in `~/.procly` (override with `PROCLY_HOME`):
   logs/<name>-error.log
 ```
 
+What happens to your apps if the daemon itself dies, and what to do, is in
+[docs/daemon-failure.md](docs/daemon-failure.md).
+
 ## Contributing
 
 Bug reports, ideas and pull requests are welcome. Start with
