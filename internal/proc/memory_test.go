@@ -26,8 +26,27 @@ func fastMemoryChecks(t *testing.T) {
 	t.Cleanup(func() { memoryCheckEvery = old })
 }
 
-func TestMaxMemoryRestartsAProcessThatGrows(t *testing.T) {
-	fastMemoryChecks(t)
+// slowSampler stops the background sampler from getting in the way, so a test
+// can call checkMemory itself at the moment it wants.
+func slowSampler(t *testing.T) {
+	old := memoryCheckEvery
+	memoryCheckEvery = time.Hour
+	t.Cleanup(func() { memoryCheckEvery = old })
+}
+
+// overTheLimit waits until the process is really using more than limit.
+func overTheLimit(t *testing.T, m *Manager, name string, limit int64) {
+	t.Helper()
+	eventually(t, name+" to use more than its limit", func() bool {
+		in, err := m.Get(name)
+		return err == nil && in.PID > 0 && groupMemory([]int{in.PID})[in.PID] > limit
+	})
+}
+
+// A leak shows after the process has been up a while: that is restarted without
+// counting as a crash.
+func TestMaxMemoryRestartsALeakWithoutCountingItAsACrash(t *testing.T) {
+	slowSampler(t)
 	m, _ := newTestManager(t)
 	got := make(chan Event, 4)
 	m.OnEvent(func(e Event) { got <- e })
@@ -38,20 +57,28 @@ func TestMaxMemoryRestartsAProcessThatGrows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	overTheLimit(t, m, "leaky", 60<<20)
+	m.mu.Lock()
+	p := m.procs["leaky"]
+	m.mu.Unlock()
+	p.mu.Lock()
+	p.startedAt = time.Now().Add(-time.Minute) // it has been running for a while
+	p.crashes = 2                              // and had a couple of crashes some time ago
+	p.mu.Unlock()
+	m.checkMemory()
 
-	var e Event
 	select {
-	case e = <-got:
-	case <-time.After(15 * time.Second):
+	case e := <-got:
+		if e.Kind != EventMemory || e.Process != "leaky" || !strings.Contains(e.Detail, "the limit is 60 MB") {
+			t.Errorf("event = %+v", e)
+		}
+	case <-time.After(5 * time.Second):
 		t.Fatal("a process above its limit was never restarted")
 	}
-	if e.Kind != EventMemory || e.Process != "leaky" || !strings.Contains(e.Detail, "the limit is 60 MB") {
-		t.Errorf("event = %+v", e)
-	}
-
-	// It was restarted (new pid), the history says why, and it did not count as a crash.
-	eventually(t, "a new pid", func() bool { in, _ := m.Get("leaky"); return in.PID > 0 && in.PID != first.PID })
 	in, _ := m.Get("leaky")
+	if in.PID == 0 || in.PID == first.PID {
+		t.Errorf("it should be running again under a new pid: %d -> %d", first.PID, in.PID)
+	}
 	if in.Restarts < 1 {
 		t.Errorf("a memory restart shows in the restarts column: %d", in.Restarts)
 	}
@@ -64,11 +91,62 @@ func TestMaxMemoryRestartsAProcessThatGrows(t *testing.T) {
 	if !why {
 		t.Errorf("the history should say why: %+v", in.History)
 	}
-	m.mu.Lock()
-	crashes := m.procs["leaky"].crashes
-	m.mu.Unlock()
+	p.mu.Lock()
+	crashes := p.crashes
+	p.mu.Unlock()
 	if crashes != 0 {
-		t.Errorf("a memory restart must not count toward max_restarts, crashes = %d", crashes)
+		t.Errorf("a leak found after a long run is not a crash, and the restart is a fresh start: crashes = %d", crashes)
+	}
+}
+
+// Over the limit right after starting means the limit is wrong for this app.
+// It must not restart every few seconds for ever.
+func TestMaxMemoryGivesUpWhenTheLimitIsExceededRightAfterStarting(t *testing.T) {
+	slowSampler(t)
+	m, _ := newTestManager(t)
+	events := make(chan Event, 16)
+	m.OnEvent(func(e Event) { events <- e })
+
+	s := spec(t, "toolow", growBy(t, 120))
+	s.MaxMemory = "60MB"
+	s.MaxRestarts = 3
+	if _, err := m.Start(s); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 20; i++ {
+		in, _ := m.Get("toolow")
+		if in.Status == StatusErrored {
+			break
+		}
+		overTheLimit(t, m, "toolow", 60<<20)
+		m.checkMemory()
+	}
+	in, _ := m.Get("toolow")
+	if in.Status != StatusErrored || in.PID != 0 {
+		t.Fatalf("it should have given up: %+v", in)
+	}
+	if in.Restarts != 3 {
+		t.Errorf("max_restarts 3 means three restarts, then giving up: restarts = %d", in.Restarts)
+	}
+	last := in.History[len(in.History)-1]
+	if last.Kind != EventErrored || !strings.HasPrefix(last.Detail, "gave up after 3 restarts for using too much memory") || !strings.Contains(last.Detail, "Raise max_memory") {
+		t.Errorf("the last event should say it gave up and what to do: %+v", last)
+	}
+	// Events are delivered in their own goroutines, so wait for the one that matters.
+	deadline := time.After(5 * time.Second)
+	for gaveUp := false; !gaveUp; {
+		select {
+		case e := <-events:
+			gaveUp = e.Kind == EventErrored && strings.HasPrefix(e.Detail, "gave up")
+		case <-deadline:
+			t.Fatal("an alert event for giving up should have been sent")
+		}
+	}
+	// And it stays down: the sampler leaves a stopped process alone.
+	m.checkMemory()
+	time.Sleep(300 * time.Millisecond)
+	if in, _ := m.Get("toolow"); in.PID != 0 || in.Status != StatusErrored {
+		t.Errorf("it came back: %+v", in)
 	}
 }
 
