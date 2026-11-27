@@ -13,16 +13,36 @@
 </head>
 <body>
   <div id="login" class="login" hidden>
-    <form id="login-form" class="login-card" autocomplete="on">
-      <div class="brand"><img class="brand-mark" src="/assets/favicon.svg" alt="" width="32" height="32"><span>procly</span></div>
-      <h1>Sign in</h1>
-      <p class="muted">Enter the panel password for this server.</p>
-      <label for="password">Password</label>
-      <input id="password" name="password" type="password" autocomplete="current-password" required autofocus>
-      <p class="error" id="login-error" role="alert"></p>
-      <button type="submit" class="btn primary" id="login-btn">Sign in</button>
-      <p class="hint">Lost it? On the server run <code>procly web --reset-password</code></p>
-    </form>
+    <div class="login-shell">
+      <aside class="login-art" aria-hidden="true">
+        <div class="brand"><img class="brand-mark" src="/assets/favicon.svg" alt="" width="28" height="28"><span>procly</span></div>
+        <svg class="login-svg" viewBox="0 0 420 300" xmlns="http://www.w3.org/2000/svg" focusable="false">
+          <rect class="ls-rack" x="60" y="40" width="210" height="46" rx="8"/>
+          <rect class="ls-rack" x="60" y="98" width="210" height="46" rx="8"/>
+          <rect class="ls-rack" x="60" y="156" width="210" height="46" rx="8"/>
+          <circle class="ls-led on" cx="84" cy="63" r="5"/><circle class="ls-led on d1" cx="84" cy="121" r="5"/><circle class="ls-led warn d2" cx="84" cy="179" r="5"/>
+          <rect class="ls-bar" x="104" y="58" width="96" height="10" rx="5"/><rect class="ls-bar" x="104" y="116" width="72" height="10" rx="5"/><rect class="ls-bar" x="104" y="174" width="120" height="10" rx="5"/>
+          <rect class="ls-fill" x="104" y="58" width="64" height="10" rx="5"/><rect class="ls-fill" x="104" y="116" width="30" height="10" rx="5"/><rect class="ls-fill" x="104" y="174" width="84" height="10" rx="5"/>
+          <rect class="ls-card" x="226" y="170" width="150" height="104" rx="12"/>
+          <polyline class="ls-line" points="242,246 266,232 288,240 312,212 336,222 360,196"/>
+          <circle class="ls-dot" cx="360" cy="196" r="5"/>
+          <rect class="ls-bar" x="242" y="184" width="54" height="8" rx="4"/>
+          <path class="ls-ring" d="M330 54 a38 38 0 1 1 -2 0"/>
+          <path class="ls-tick" d="M316 92 l12 12 l24 -26"/>
+        </svg>
+        <h2>Every process, one calm panel.</h2>
+        <p>Start, watch and restart your apps from here. Logs, health and domains are one click away.</p>
+      </aside>
+      <form id="login-form" class="login-card" autocomplete="on">
+        <h1>Sign in</h1>
+        <p class="muted">Enter the panel password for this server.</p>
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required autofocus>
+        <p class="error" id="login-error" role="alert"></p>
+        <button type="submit" class="btn primary" id="login-btn">Sign in</button>
+        <p class="hint">Lost it? On the server run <code>procly web --reset-password</code></p>
+      </form>
+    </div>
   </div>
 
   <div id="app" class="app" hidden>
