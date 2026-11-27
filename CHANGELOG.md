@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased (v0.5.0)
+## v0.5.0
 
 Cluster mode, a password you can change, and a fuller server page.
 
