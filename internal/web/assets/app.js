@@ -917,6 +917,43 @@ function sectionHead(title, sub, right) {
   return h("div", { class: "section-head" }, h("h2", { text: title }), sub && h("span", { class: "muted", text: sub }), right && h("div", { class: "right" }, right));
 }
 
+// The fleet chart: CPU or memory of everything running, over the last two
+// minutes, with a rule and a tooltip that follow the pointer.
+function drawFleet(card, force) {
+  if (!force && card.childElementCount && card.matches(":hover")) return; // do not redraw under the pointer
+  const mode = card.dataset.mode || "cpu";
+  const data = S.fleet || [];
+  const vals = data.map((d) => (mode === "cpu" ? d.cpu : d.mem));
+  const fmt = mode === "cpu" ? (v) => v.toFixed(1) + "%" : fmtBytes;
+  const seg = h("div", { class: "seg" }, ["cpu", "mem"].map((m) => {
+    const b = h("button", { type: "button", class: m === mode ? "on" : "", text: m === "cpu" ? "CPU" : "Memory" });
+    b.addEventListener("click", () => { card.dataset.mode = m; drawFleet(card, true); });
+    return b;
+  }));
+  const box = h("div", { class: "fleet-plot" });
+  card.replaceChildren(h("div", { class: "card-title" }, h("h2", { text: "Resource usage" }), h("span", { class: "muted", text: "last " + Math.round((HISTORY * POLL_MS) / 60000) + " min" }), h("div", { class: "right" }, seg)), box);
+  if (vals.length < 2) { box.append(emptyBox("events", "Collecting samples", "The chart fills in as the panel watches.")); return; }
+  const W = 600, H = 150;
+  const { d, first, last } = sparkPath(vals, W, H, 8, { fromZero: true, minSpan: mode === "cpu" ? 5 : 1048576, slots: HISTORY });
+  const svg = svgEl("svg", { class: "chart fleet", viewBox: `0 0 ${W} ${H}`, preserveAspectRatio: "none" });
+  svg.append(svgEl("line", { class: "grid", x1: 0, x2: W, y1: H / 2, y2: H / 2 }), svgEl("path", { class: "area", d: `${d} L${last[0]} ${H} L${first[0]} ${H} Z` }), svgEl("path", { class: "line", d }));
+  const rule = h("div", { class: "fleet-rule", hidden: true });
+  const tip = h("div", { class: "fleet-tip", hidden: true });
+  box.append(svg, rule, tip);
+  svg.addEventListener("pointermove", (e) => {
+    const r = svg.getBoundingClientRect();
+    const slot = Math.round(((e.clientX - r.left) / r.width) * (HISTORY - 1));
+    const i = slot - (HISTORY - vals.length);
+    if (i < 0 || i >= vals.length) { rule.hidden = tip.hidden = true; return; }
+    const x = ((HISTORY - vals.length + i) / (HISTORY - 1)) * r.width;
+    rule.hidden = tip.hidden = false;
+    rule.style.left = x + "px";
+    tip.style.left = Math.min(Math.max(x, 50), r.width - 50) + "px";
+    tip.textContent = fmt(vals[i]) + " · " + fmtAgo((vals.length - 1 - i) * POLL_MS);
+  });
+  svg.addEventListener("pointerleave", () => { rule.hidden = tip.hidden = true; });
+}
+
 const PAGES = {};
 
 // ----- overview -----
@@ -931,16 +968,19 @@ PAGES.overview = () => {
       document.title = "Overview · procly";
       refs = {
         state: h("div", { class: "band-state" }),
-        stats: h("dl", { class: "stats" }),
+        stats: h("div", { class: "kpi-row" }),
+        chart: h("div", { class: "card fleet-card" }),
         attention: h("div", { class: "attention-slot" }),
         servers: h("tbody"),
         events: h("div", { class: "card" }),
         busy: h("div", { class: "card" }),
       };
       root.append(h("div", { class: "page" },
-        h("div", { class: "band" }, refs.state, refs.stats),
+        h("div", { class: "band" }, refs.state),
+        refs.stats,
         h("div", { class: "cols" },
           h("div", {},
+            refs.chart,
             refs.attention,
             h("div", { class: "section" }, sectionHead("Servers", null, h("a", { class: "more", href: "#/servers" }, "Manage", icon("chevronRight"))),
               h("div", { class: "card" }, h("table", { class: "table" },
@@ -981,17 +1021,26 @@ PAGES.overview = () => {
         title = `${c.online} of ${total} running`;
         sub = plural(c.stopped, "process is", "processes are") + " stopped";
       }
-      fill(refs.state, h("i", { class: "dot " + tone }), h("div", {}, h("h1", { text: title }), sub && h("div", { class: "band-sub", text: sub })));
+      const hr = new Date().getHours();
+      const hello = hr < 5 ? "Working late" : hr < 12 ? "Good morning" : hr < 18 ? "Good afternoon" : "Good evening";
+      fill(refs.state, h("div", {}, h("div", { class: "greet", text: `${hello}, here is ${serverLabel(S.server)}` }), h("h1", { text: title }), sub && h("div", { class: "band-sub", text: sub })));
+      refs.state.className = "band-state " + tone;
 
       const up = all.filter((x) => x.p.pid);
       const rs = all.reduce((a, x) => a + x.p.restarts, 0);
-      const stats = [
-        several && ["Servers", `${okServers().length}/${S.servers.length}`, "", down.length ? "bad" : ""],
-        ["CPU", up.reduce((a, x) => a + x.p.cpu, 0).toFixed(1) + "%", ""],
-        ["Memory", fmtBytes(up.reduce((a, x) => a + x.p.memory, 0)), ""],
-        ["Restarts", String(rs), "", rs ? "warn" : ""],
-      ].filter(Boolean);
-      fill(refs.stats, ...stats.map(([label, value, subText, t]) => { const el = stat(label); setStat(el, value, subText, t); return el; }));
+      const cpu = up.reduce((a, x) => a + x.p.cpu, 0);
+      const mem = up.reduce((a, x) => a + x.p.memory, 0);
+      if (S.fleetTick !== S.tick) { S.fleetTick = S.tick; (S.fleet = S.fleet || []).push({ cpu, mem }); if (S.fleet.length > HISTORY) S.fleet.shift(); }
+      const cards = [
+        ["processes", "Processes", `${c.online}`, `of ${total} running`, bad.length ? (bad.some((x) => x.p.status === "errored" || x.p.health === "unhealthy") ? "bad" : "warn") : total ? "good" : "", bad.length ? `${bad.length} to check` : total ? "Healthy" : "Empty"],
+        ["cpu", "CPU", cpu.toFixed(1) + "%", "all processes", cpu >= 80 ? "warn" : "good", cpu >= 80 ? "High" : "Normal"],
+        ["memory", "Memory", fmtBytes(mem), "all processes", "good", `${up.length} running`],
+        ["restarts", "Restarts", String(rs), several ? `on ${plural(S.servers.length, "server")}` : "since start", rs ? "warn" : "good", rs ? "Some crashes" : "Stable"],
+      ];
+      fill(refs.stats, ...cards.map(([k, label, value, sub2, t, chip]) => h("div", { class: "kpi-card" },
+        h("div", { class: "kpi-top" }, h("span", { class: "kpi-name", text: label }), h("span", { class: "chip " + t, text: chip })),
+        h("div", { class: "kpi-big", text: value }), h("div", { class: "kpi-foot", text: sub2 }))));
+      drawFleet(refs.chart);
 
       // what needs attention, only when something does
       if (!bad.length) {
