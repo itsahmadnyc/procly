@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.5.4
+
+Going back from cluster to fork.
+
+- **Fixed**: switching an app from cluster back to fork turned its N workers into N separate copies. Two copies of an app that listens on a fixed port fight over it, and one of them crashes over and over (found on a real server). Now fork means one process, the app as it was. Separate copies are only made when you ask for them (`procly mode web fork --instances 2`).
+- The mode dialog says what cluster costs: every worker runs the app's start-up code, so database syncs or migrations at boot run once per worker. Try 2 workers first and watch the CPU.
+
 ## v0.5.3
 
 - **Processes page**: a summary strip (running, need attention, CPU, memory, restarts), two-line rows (name with a cluster tag, command under it), status pills, memory bars, always-visible restart and stop buttons, and a sort menu (name, CPU, memory, restarts, uptime).

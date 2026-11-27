@@ -897,3 +897,4 @@ a.act-item:hover { background: var(--hover); }
 #view .table .cell-actions .icon-btn:hover { background: var(--active); color: var(--text); }
 #view .table .hide-sm.icon-btn, .cell-actions .icon-btn { opacity: 1; visibility: visible; }
 @media (max-width: 900px) { .pstrip { grid-template-columns: repeat(2, minmax(0, 1fr)); } .pcell:nth-child(odd) { border-left: 0; } .pcell:nth-child(n+3) { border-top: 1px solid var(--hair); } }
+.warn-line { color: var(--amber) !important; }

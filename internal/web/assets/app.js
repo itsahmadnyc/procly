@@ -674,18 +674,19 @@ function changeMode(server, p) {
   const current = mode;
   formDialog({
     title: `Run ${p.name} in…`, ok: "Continue",
-    text: "Fork runs separate processes. Cluster runs one Node app as several workers that share its ports.",
+    text: "Fork is one ordinary process. Cluster runs your Node app as several workers that share its ports.",
     build(inputs) {
       const wrap = h("div", {});
       const opts = {};
       const workers = h("input", { id: "fd-workers", type: "number", min: "0", max: "64", value: String(p.instances > 1 ? p.instances : 2) });
       inputs.workers = workers;
       const field = h("div", { class: "field" }, h("label", { for: "fd-workers", text: "Workers" }), workers, h("p", { class: "hintline", text: "0 means one worker per CPU." }));
-      const paint = () => { for (const [m, b] of Object.entries(opts)) b.setAttribute("aria-pressed", String(m === mode)); field.hidden = mode !== "cluster"; };
-      for (const [m, name, sub] of [["fork", "Fork", "separate processes, any command"], ["cluster", "Cluster", "Node only, shares ports, rolling reload"]]) {
+      const paint = () => { for (const [m, b] of Object.entries(opts)) b.setAttribute("aria-pressed", String(m === mode)); field.hidden = mode !== "cluster"; warn.hidden = mode !== "cluster"; };
+      for (const [m, name, sub] of [["fork", "Fork", "one process, any command"], ["cluster", "Cluster", "Node only, shares ports, rolling reload"]]) {
         opts[m] = h("button", { type: "button", class: "mode-opt", onclick: () => { mode = m; paint(); } }, h("b", { text: name }), h("span", { text: sub }));
       }
-      wrap.append(h("div", { class: "mode-opts" }, opts.fork, opts.cluster), field);
+      const warn = h("p", { class: "hintline warn-line", text: "Every worker runs your app's start-up code. If it syncs or migrates a database when it starts, or does heavy work at boot, that happens once per worker and can pile up CPU. Try 2 workers first and watch the CPU." });
+      wrap.append(h("div", { class: "mode-opts" }, opts.fork, opts.cluster), field, warn);
       paint();
       return wrap;
     },
