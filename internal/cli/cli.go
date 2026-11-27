@@ -39,6 +39,8 @@ Processes
   delete <name|id|all>          Stop and forget processes          alias: rm
   list [--json]                 Show all processes                 alias: ls
   describe <name|id> [--json]   Details for one process            alias: show
+  domains [--json]              Which domain names reach each process (reads nginx,
+                                Caddy and Apache config; --refresh looks again)
   logs [name|id]                Print and follow logs
   monit                         Live dashboard in the terminal     alias: dash
   web                           Web panel (--addr, --port, --reset-password,
@@ -122,6 +124,8 @@ func Run(argv []string) int {
 		err = cmdList(rest)
 	case "describe", "show", "info":
 		err = cmdDescribe(rest)
+	case "domains", "domain":
+		err = cmdDomains(rest)
 	case "logs", "log":
 		err = cmdLogs(rest)
 	case "monit", "dash", "top":
@@ -666,6 +670,9 @@ func cmdDescribe(argv []string) error {
 		[2]string{"restarts", fmt.Sprint(in.Restarts)},
 		[2]string{"autorestart", auto},
 	)
+	if rep, err := c.Domains(false); err == nil {
+		rows = append(rows, domainRows(rep, in.Name)...)
+	}
 	if in.Spec.Health != "" {
 		h := string(in.Health)
 		if h == "" {

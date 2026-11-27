@@ -310,6 +310,24 @@ Scrolling the logs redraws most of the screen (about 7 KB a frame), so `monit` s
 the screen lag behind your scrolling. `PROCLY_FPS=1..60` sets it. A key held down or a trackpad
 flick speeds up the longer it goes on, so it reaches its place in fewer frames.
 
+## Which domain reaches an app
+
+`procly domains` answers "is this app connected to a domain?". procly finds the TCP ports each
+process listens on, reads the reverse proxies on the same machine (nginx, Caddy, Apache), and lists
+the names whose traffic they send to those ports, with the path, whether the site has TLS, and where
+the name points in DNS (this server, Cloudflare, or another address). Nothing is changed.
+
+```text
+  name       ports   domain                    via      dns
+  api        :5703   auclux-api.example.com    nginx    DNS points to Cloudflare
+  worker     :4100   no domain found
+```
+
+The same answer is in the panel (a Domain column, and "Domain" on a process's page with a Scan again
+button) and in `procly monit`. It reads `/etc/nginx/nginx.conf` and what it includes, `/etc/caddy/Caddyfile`,
+and `/etc/apache2/sites-enabled` or `/etc/httpd/conf.d`, so run procly as a user that can read them.
+Docker labels, Traefik and other proxies are not read. On Linux and macOS only.
+
 ## Several servers
 
 One panel can manage many machines. On every extra server, run the agent:
@@ -449,6 +467,7 @@ id from `https://api.telegram.org/bot<token>/getUpdates`.
 | `procly describe <name>` | Everything about one process; `--json` prints one JSON object |
 | `procly logs [name]` | Print recent lines and follow |
 | `procly monit` | Live dashboard: processes, CPU/memory graphs, logs |
+| `procly domains` | Which domain names reach each process (reads nginx, Caddy and Apache config) |
 | `procly web` | Web panel for the same, in the browser |
 | `procly agent` | Let another server's panel manage this one |
 | `procly server add/ls/rm` | Connect, list and remove other servers |

@@ -83,6 +83,7 @@ const S = {
   server: load("procly.server") || "local",
   procs: new Map(),  // server -> {list, error}
   system: new Map(), // server -> {data, error}
+  domains: new Map(), // server -> {data, error}: which names reach which process
   hist: new Map(),   // key(server, name) -> {pid, cpu: [], mem: []}
   busy: new Map(),   // key(server, name) -> verb
   connected: true,
@@ -164,6 +165,40 @@ async function loadSystem(server) {
   }
 }
 
+// loadDomains asks a server which domain names reach its processes. The
+// server scans its proxies' configuration (nginx, Caddy, Apache); refresh
+// asks it to look again instead of using its few-seconds-old answer.
+async function loadDomains(server, refresh) {
+  try {
+    const data = await api("GET", `${srvPath(server)}/domains${refresh ? "?refresh=1" : ""}`);
+    S.domains.set(server, { data, error: null });
+  } catch (err) {
+    if (handleErr(err)) return;
+    const old = err.status === 404 && server !== "local" ? "Finding domains needs procly 0.4.7 or newer on this server." : err.message;
+    S.domains.set(server, { data: null, error: old });
+  }
+}
+
+// domainsFor is what the last scan found for one process: its ports and the
+// names that reach them, or null when there is no answer (yet).
+function domainsFor(server, name) {
+  const e = S.domains.get(server);
+  if (!e || !e.data) return null;
+  return (e.data.processes || []).find((p) => p.name === name) || null;
+}
+
+// A name in words: where it points, as far as DNS says.
+function dnsLabel(dns) {
+  if (!dns || !dns.status) return null;
+  const first = (dns.addrs || [])[0];
+  return {
+    here: { text: "points here", tone: "good" },
+    cloudflare: { text: "via Cloudflare", tone: "good" },
+    elsewhere: { text: first ? `points to ${first}` : "points elsewhere", tone: "" },
+    none: { text: "does not resolve", tone: "bad" },
+  }[dns.status] || null;
+}
+
 function record(server, list) {
   const seen = new Set();
   for (const p of list) {
@@ -200,6 +235,7 @@ async function poll() {
   if (fleet && n % 2 === 0) {
     for (const s of S.servers) if (s.name !== S.server && s.ok) jobs.push(loadProcs(s.name));
   }
+  if (n % 15 === 0 && (page === "processes" || page === "process")) jobs.push(loadDomains(current.server));
   if (n % 5 === 0) {
     if (fleet) for (const s of S.servers) jobs.push(loadSystem(s.name));
     else if (page === "server") jobs.push(loadSystem(current.server));
@@ -751,6 +787,8 @@ function route() {
       Promise.allSettled([...okServers().map((s) => loadProcs(s.name)), ...S.servers.map((s) => loadSystem(s.name))]).then(refresh);
     } else if (r.page === "server") {
       loadSystem(r.server).then(refresh);
+    } else if (r.page === "processes" || r.page === "process") {
+      loadDomains(r.server).then(refresh);
     }
   }
   refresh();
@@ -1050,7 +1088,7 @@ PAGES.processes = () => {
           h("div", { class: "table-wrap" },
             h("table", { class: "table" },
               h("thead", {}, h("tr", {},
-                h("th", { text: "Name" }), h("th", { text: "Status" }), h("th", { class: "col-health hide-md", text: "Health" }),
+                h("th", { text: "Name" }), h("th", { text: "Status" }), h("th", { class: "col-domain hide-lg", text: "Domain" }), h("th", { class: "col-health hide-md", text: "Health" }),
                 h("th", { class: "r", text: "CPU" }), h("th", { class: "r hide-sm", text: "Memory" }), h("th", { class: "r hide-sm", text: "Uptime" }),
                 h("th", { class: "r hide-sm", text: "Restarts" }), h("th", { class: "r" }, h("span", { class: "visually-hidden", text: "Actions" })))),
               refs.body)),
@@ -1103,8 +1141,10 @@ PAGES.processes = () => {
       }
       const anyHealth = list.some((p) => p.health_check);
       refs.table.classList.toggle("no-health", !anyHealth);
+      const dom = S.domains.get(srv);
+      refs.table.classList.toggle("no-domain", !(dom && dom.data && dom.data.processes.some((p) => p.domains.length)));
       if (!entry) { // loading: rows with the shape of what is coming
-        fill(refs.body, ...[62, 48, 55, 40].map((w) => { const i = h("i"); i.style.width = w + "%"; return h("tr", { class: "skel" }, h("td", { colspan: "8" }, i)); }));
+        fill(refs.body, ...[62, 48, 55, 40].map((w) => { const i = h("i"); i.style.width = w + "%"; return h("tr", { class: "skel" }, h("td", { colspan: "9" }, i)); }));
       } else {
         fill(refs.body, ...rows);
       }
@@ -1135,6 +1175,22 @@ function toggleExpanded(server, group) {
   const set = expandedSet(), k = expandedKey(server, group);
   set.has(k) ? set.delete(k) : set.add(k);
   store("procly.expanded", JSON.stringify([...set]));
+}
+
+// The domain column: the first name that reaches the process, and how many
+// more there are. The title has the whole story.
+function domainCell(server, names) {
+  const hosts = [], lines = [];
+  for (const n of names) {
+    const d = domainsFor(server, n);
+    for (const x of d ? d.domains : []) {
+      if (!hosts.includes(x.host)) hosts.push(x.host);
+      lines.push(`${x.scheme}://${x.host === "*" ? "(default site)" : x.host}${x.path || ""}  ←  ${x.source}`);
+    }
+  }
+  if (!hosts.length) return h("span", { class: "dim", text: "–" });
+  return h("span", { class: "domain", title: lines.join("\n") },
+    hosts[0] === "*" ? "default site" : hosts[0], hosts.length > 1 && h("span", { class: "muted", text: ` +${hosts.length - 1}` }));
 }
 
 // A number with a short bar beside it. Without a bar the space is kept, so a
@@ -1168,6 +1224,7 @@ function groupRow(server, group, members, open, onToggle) {
     h("td", {}, h("div", { class: "group-name" }, h("span", { class: "chev" + (open ? " open" : "") }, icon("chevronRight")),
       h("div", { class: "cell-name" }, h("b", { text: group, title: group }), h("span", { text: `${n} instances · ${members[0].command}`, title: members[0].command })))),
     h("td", {}, busy ? h("span", { class: "status waiting", text: progressive[S.busy.get(key(server, group))] } ) : h("span", { class: "status " + sum.cls, text: sum.text })),
+    h("td", { class: "col-domain hide-lg" }, domainCell(server, members.map((p) => p.name))),
     h("td", { class: "col-health hide-md" }, h("span", { class: "health-ic none", text: members.some((p) => p.health === "unhealthy") ? "unhealthy" : "–" })),
     h("td", { class: "num r" + (up.length ? "" : " dim") }, meterEl(up.length ? up.reduce((a, p) => a + p.cpu, 0).toFixed(1) + "%" : "–", null)),
     h("td", { class: "num r hide-sm" + (up.length ? "" : " dim") }, meterEl(up.length ? fmtBytes(up.reduce((a, p) => a + p.memory, 0)) : "–", null)),
@@ -1198,6 +1255,7 @@ function procRow(server, p, child) {
   const tr = h("tr", { class: "click" + (child ? " child-row" : ""), "data-key": "p:" + p.name, onclick: () => go(href) },
     h("td", {}, h("div", { class: "cell-name" }, h("a", { class: "name", href, text: p.name, title: p.name }), h("span", { text: p.command, title: p.command }))),
     h("td", {}, statusEl(server, p)),
+    h("td", { class: "col-domain hide-lg" }, domainCell(server, [p.name])),
     h("td", { class: "col-health hide-md" }, healthEl(p)),
     h("td", { class: "num r" + (up ? "" : " dim") }, meterEl(up ? p.cpu.toFixed(1) + "%" : "–", up ? p.cpu / 100 : null)),
     h("td", { class: "num r hide-sm" + (up ? "" : " dim") }, meterEl(up ? fmtBytes(p.memory) : "–", up && p.max_memory ? p.memory / p.max_memory : null)),
@@ -1338,9 +1396,9 @@ TAB_PAGES.overview = (srv, name) => {
   let refs;
   return {
     mount(root) {
-      refs = { cpu: chartCard("CPU"), mem: chartCard("Memory"), up: stat("Uptime"), rs: stat("Restarts"), health: stat("Health"), facts: h("dl", { class: "facts" }), events: h("div") };
+      refs = { cpu: chartCard("CPU"), mem: chartCard("Memory"), up: stat("Uptime"), rs: stat("Restarts"), health: stat("Health"), domain: stat("Domain"), facts: h("dl", { class: "facts" }), events: h("div") };
       root.append(
-        h("dl", { class: "stats under" }, refs.up, refs.rs, refs.health),
+        h("dl", { class: "stats under" }, refs.up, refs.rs, refs.health, refs.domain),
         refs.charts = h("div", { class: "charts" }, refs.cpu, refs.mem),
         h("div", { class: "cols section" },
           h("div", {}, sectionHead("Details"), h("div", { class: "card" }, refs.facts)),
@@ -1360,10 +1418,19 @@ TAB_PAGES.overview = (srv, name) => {
         p.restarts ? "warn" : "");
       setStat(refs.health, p.health_check ? (p.health || "not running") : "none set", p.health_check ? "" : "", p.health === "healthy" ? "good" : p.health === "unhealthy" ? "bad" : "");
 
+      const dm = domainsFor(srv(), p.name), de = S.domains.get(srv());
+      if (de && de.error) setStat(refs.domain, "unknown", "");
+      else if (!dm) setStat(refs.domain, "scanning…", "");
+      else if (dm.domains.length) setStat(refs.domain, dm.domains[0].host === "*" ? "default site" : dm.domains[0].host, dm.domains.length > 1 ? `+${dm.domains.length - 1} more` : `${dm.domains[0].scheme} · ${dm.domains[0].source}`);
+      else if (!dm.ports.length) setStat(refs.domain, "no port", p.pid ? "not listening" : "not running");
+      else setStat(refs.domain, "none found", "not connected");
+
       const facts = h("dl");
       const add = (k, v, cls) => facts.append(h("dt", { text: k }), v instanceof Node ? h("dd", { class: cls || "" }, v) : h("dd", { class: cls || "", text: v, title: v }));
       add("Command", p.command);
       add("Directory", p.cwd);
+      if (dm && dm.ports.length) add("Listens on", dm.ports.map((x) => ":" + x).join("  "));
+      add("Domain", domainFact(srv(), p, dm, de));
       add("Autorestart", p.autorestart ? `on, gives up after ${p.max_restarts} quick crashes` : "off");
       if (p.health_check) add("Health check", `${p.health || "not running"} · ${p.health_check}`, p.health === "healthy" ? "good" : p.health === "unhealthy" ? "bad" : "");
       if (p.restart_every || p.restart_at) add("Scheduled restart", [p.restart_every && `every ${p.restart_every} after a start`, p.restart_at && `every day at ${p.restart_at} (server time)`].filter(Boolean).join(" and "));
@@ -1376,6 +1443,36 @@ TAB_PAGES.overview = (srv, name) => {
     },
   };
 };
+
+// domainFact answers "is this app connected to a domain?" for the details:
+// the names that reach it and where they point, or why none were found.
+function domainFact(server, p, dm, de) {
+  const sourcesText = (rep) => (rep.sources || []).map((x) => `${x.name} (${x.error ? "could not read: " + x.error : x.found ? plural(x.sites, "site") : "not found"})`).join(", ");
+  const again = h("button", { class: "btn small ghost", type: "button", title: "Read the proxy configuration again", onclick: async (e) => {
+    e.currentTarget.disabled = true;
+    await loadDomains(server, true);
+    refresh();
+    toast("Scanned again");
+  } }, icon("restart"), "Scan again");
+  if (de && de.error) return h("div", {}, h("span", { class: "muted", text: de.error }), " ", again);
+  if (!dm) return h("span", { class: "muted", text: "Scanning the proxy configuration…" });
+  const box = h("div", { class: "doms" });
+  for (const d of dm.domains) {
+    const dns = dnsLabel(d.dns);
+    box.append(h("div", { class: "dom" },
+      h("span", { class: "mono", text: (d.host === "*" ? "default site" : d.host) + (d.path || "") }),
+      h("span", { class: "muted", text: `${d.scheme} · ${d.source}` }),
+      dns && h("span", { class: "badge " + dns.tone, text: dns.text, title: (d.dns.addrs || []).join(", ") })));
+  }
+  if (!dm.domains.length) {
+    const text = !dm.ports.length
+      ? (p.pid ? "Not listening on a TCP port, so no site can reach it." : "Not running.")
+      : `None found. It listens on ${dm.ports.map((x) => ":" + x).join(" ")}, but no site in this server's nginx, Caddy or Apache configuration sends traffic there.`;
+    box.append(h("div", { class: "muted", text }));
+  }
+  box.append(h("div", { class: "dom-foot" }, h("span", { class: "muted", text: "Looked at " + sourcesText(de.data) + "." }), again));
+  return box;
+}
 
 function eventsCard(evs) {
   if (!evs.length) return h("div", { class: "card" }, emptyBox("events", "No events yet", "Crashes, restarts and failed health checks show up here."));

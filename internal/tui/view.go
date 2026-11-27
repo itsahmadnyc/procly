@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/itsahmadnyc/procly/internal/domains"
 	"github.com/itsahmadnyc/procly/internal/proc"
 	"github.com/itsahmadnyc/procly/internal/version"
 )
@@ -227,12 +228,13 @@ var allColumns = []column{
 	{"name", "name", false}, {"status", "status", false},
 	{"cpu", "cpu", true}, {"cpubar", "", false},
 	{"mem", "memory", true}, {"membar", "", false},
+	{"domain", "domain", false},
 	{"uptime", "uptime", true}, {"restarts", "restarts", true},
 	{"health", "health", false}, {"pid", "pid", true},
 }
 
 // dropOrder is which columns go first when the table is too narrow.
-var dropOrder = []string{"pid", "membar", "cpubar", "uptime", "health", "restarts", "mem", "cpu"}
+var dropOrder = []string{"pid", "membar", "cpubar", "domain", "uptime", "health", "restarts", "mem", "cpu"}
 
 const barW = 8
 
@@ -310,6 +312,8 @@ func (m model) cell(r row, key string, maxMem int64) string {
 		return fmtDuration(time.Duration(r.v.UptimeMs) * time.Millisecond)
 	case "restarts":
 		return fmt.Sprint(st.restarts)
+	case "domain":
+		return m.domainText(r)
 	case "health":
 		return healthText(r.views())
 	case "pid":
@@ -395,15 +399,18 @@ func (m model) tableBox(r rect) []string {
 		return box("Processes", note, body, r.w, r.h, focused)
 	}
 
-	withHealth := false
+	withHealth, withDomain := false, false
 	var maxMem int64
 	for _, v := range m.views {
 		withHealth = withHealth || v.HealthCheck != ""
 		maxMem = max(maxMem, v.Memory)
 	}
+	for _, p := range m.doms.Processes {
+		withDomain = withDomain || len(p.Domains) > 0
+	}
 	cols := []column{}
 	for _, c := range allColumns {
-		if c.key == "health" && !withHealth {
+		if (c.key == "health" && !withHealth) || (c.key == "domain" && !withDomain) {
 			continue
 		}
 		cols = append(cols, c)
@@ -552,6 +559,11 @@ func (m model) styleCell(r row, key, s string, st rowStats, maxMem int64, base l
 			return sRed.Inherit(base).Render(s)
 		}
 		return sMuted.Inherit(base).Render(s)
+	case "domain":
+		if strings.TrimSpace(s) == "-" {
+			return sFaint.Inherit(base).Render(s)
+		}
+		return sGreen.Inherit(base).Render(s)
 	case "pid", "uptime":
 		return sMuted.Inherit(base).Render(s)
 	}
@@ -647,6 +659,7 @@ func (m model) detailLines(r row, cw, n int) []string {
 		sw := min(max((cw-36)/2, 6), historyLen)
 		cpu, mem := graphs(sw)
 		out := []string{head, state, cpu + "    " + mem, command + sMuted.Render("   ") + cwd}
+		out = append(out, m.domainLines(r)...)
 		if settings != "" {
 			out = append(out, settings)
 		}
@@ -660,6 +673,7 @@ func (m model) detailLines(r row, cw, n int) []string {
 		out = append(out, cpu, mem, "")
 	}
 	out = append(out, command, cwd)
+	out = append(out, m.domainLines(r)...)
 	if settings != "" {
 		out = append(out, settings)
 	}
@@ -908,4 +922,110 @@ func (m model) helpView() string {
 		lines[i] = fit(lines[i], m.w)
 	}
 	return strings.Join(lines[:min(len(lines), m.h)], "\n")
+}
+
+// ---- domains ----
+
+// domainsOf are the names the proxies send to the process or, for a group,
+// to any of its instances.
+func (m model) domainsOf(r row) (ds []domains.Domain, ports []int, known bool) {
+	if !m.domsOK {
+		return nil, nil, false
+	}
+	for _, v := range r.views() {
+		for _, p := range m.doms.Processes {
+			if p.Name == v.Name {
+				known = true
+				ds = append(ds, p.Domains...)
+				ports = append(ports, p.Ports...)
+			}
+		}
+	}
+	return ds, ports, known
+}
+
+// domainText is the table cell: the first name, and how many more.
+func (m model) domainText(r row) string {
+	ds, _, known := m.domainsOf(r)
+	if !known || len(ds) == 0 {
+		return "-"
+	}
+	var hosts []string
+	for _, d := range ds {
+		h := d.Host
+		if h == "*" {
+			h = "default site"
+		}
+		hosts = appendOnce(hosts, h)
+	}
+	s := hosts[0]
+	if len(hosts) > 1 {
+		s += fmt.Sprintf(" +%d", len(hosts)-1)
+	}
+	return ansi.Truncate(safe(s), 30, "…")
+}
+
+func appendOnce(s []string, v string) []string {
+	for _, x := range s {
+		if x == v {
+			return s
+		}
+	}
+	return append(s, v)
+}
+
+// domainLines are the lines of the details that answer "is this connected to
+// a domain?": the names with how they are served and where they point, or
+// the reason there are none.
+func (m model) domainLines(r row) []string {
+	ds, ports, known := m.domainsOf(r)
+	if !known {
+		return nil
+	}
+	label := sMuted.Render("domain ")
+	if len(ds) > 0 {
+		var out []string
+		for i, d := range ds {
+			if i >= 3 {
+				out = append(out, sMuted.Render(fmt.Sprintf("       +%d more", len(ds)-3)))
+				break
+			}
+			host := d.Host
+			if host == "*" {
+				host = "default site"
+			}
+			line := sGreen.Render(safe(host+d.Path)) + sMuted.Render("  "+d.Scheme+" · "+d.Source)
+			switch d.DNS.Status {
+			case "here":
+				line += sMuted.Render(" · dns points here")
+			case "cloudflare":
+				line += sMuted.Render(" · via Cloudflare")
+			case "elsewhere":
+				if len(d.DNS.Addrs) > 0 {
+					line += sMuted.Render(" · dns → " + d.DNS.Addrs[0])
+				}
+			case "none":
+				line += sYellow.Render(" · dns does not resolve")
+			}
+			if i == 0 {
+				out = append(out, label+line)
+			} else {
+				out = append(out, "       "+line)
+			}
+		}
+		return out
+	}
+	if len(ports) == 0 {
+		for _, v := range r.views() {
+			if v.PID > 0 {
+				return []string{label + sMuted.Render("not listening on a port")}
+			}
+		}
+		return nil
+	}
+	var ps []string
+	for _, p := range ports {
+		ps = append(ps, fmt.Sprintf(":%d", p))
+	}
+	return []string{label + sMuted.Render("none found, listens on "+strings.Join(ps, " ")+"; no nginx, Caddy or Apache site sends traffic there")}
 }

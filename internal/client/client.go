@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/itsahmadnyc/procly/internal/domains"
 	"github.com/itsahmadnyc/procly/internal/paths"
 	"github.com/itsahmadnyc/procly/internal/proc"
 )
@@ -52,6 +53,17 @@ func (c *Client) Ping() (Ping, error) {
 func (c *Client) List() ([]proc.Info, error) {
 	var out []proc.Info
 	return out, c.call(context.Background(), http.MethodGet, "/v1/processes", nil, &out)
+}
+
+// Domains asks which names reach each running process. The daemon keeps an
+// answer for a few seconds; refresh asks for a new look.
+func (c *Client) Domains(refresh bool) (domains.Report, error) {
+	var out domains.Report
+	path := "/v1/domains"
+	if refresh {
+		path += "?refresh=1"
+	}
+	return out, c.call(context.Background(), http.MethodGet, path, nil, &out)
 }
 
 func (c *Client) Get(target string) (proc.Info, error) {

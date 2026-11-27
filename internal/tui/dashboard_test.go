@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/itsahmadnyc/procly/internal/domains"
 	"github.com/itsahmadnyc/procly/internal/proc"
 )
 
@@ -389,6 +390,84 @@ func TestFrameRate(t *testing.T) {
 		t.Setenv("PROCLY_FPS", bad)
 		if got := frameRate(); got != 8 {
 			t.Errorf("PROCLY_FPS=%q is ignored, got %d", bad, got)
+		}
+	}
+}
+
+func withDomains(t *testing.T, w, h int) model {
+	m := loadedWith(t, withGroup(t), w, h)
+	m, _ = send(m, domainsMsg{rep: domains.Report{
+		Sources: []domains.Source{{Name: "nginx", Found: true, Sites: 2}},
+		Processes: []domains.ProcessDomains{
+			{Name: "api", Ports: []int{3000}, Domains: []domains.Domain{
+				{Host: "api.example.com", Scheme: "https", Source: "nginx", DNS: domains.DNS{Status: "cloudflare"}},
+				{Host: "www.example.com", Scheme: "https", Source: "nginx"},
+			}},
+			{Name: "web", Ports: []int{4000}, Domains: []domains.Domain{}},
+			{Name: "mailer", Ports: nil, Domains: []domains.Domain{}},
+			{Name: "queue-1", Ports: []int{5001}, Domains: []domains.Domain{{Host: "jobs.example.com", Scheme: "http", Source: "caddy", DNS: domains.DNS{Status: "none"}}}},
+		},
+	}})
+	return m
+}
+
+func TestDomainsShowInTheTableAndTheDetails(t *testing.T) {
+	m := withDomains(t, 160, 40)
+	view := ansi.Strip(m.View())
+	for _, want := range []string{"domain", "api.example.com +1", "jobs.example.com"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("table is missing %q:\n%s", want, view)
+		}
+	}
+	// api is selected first: its names, how they are served and where they point
+	for _, want := range []string{"domain api.example.com", "https · nginx", "via Cloudflare", "www.example.com"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("details are missing %q:\n%s", want, view)
+		}
+	}
+	m, _ = send(m, key("j")) // web: listens, no domain
+	if v := ansi.Strip(m.View()); !strings.Contains(v, "none found, listens on :4000") {
+		t.Errorf("an app with a port and no domain says so:\n%s", v)
+	}
+	m, _ = send(m, key("j")) // mailer: errored, not running, no ports and not running: no line
+	if v := ansi.Strip(m.View()); strings.Contains(v, "domain none found") {
+		t.Errorf("a process that is not running has nothing to say about domains:\n%s", v)
+	}
+	// a name that does not resolve is shown as a warning, in the group's line too
+	m, _ = send(m, key("G"), tea.KeyMsg{Type: tea.KeyLeft}) // queue-1 up to its group
+	if v := ansi.Strip(m.View()); !strings.Contains(v, "dns does not resolve") || !strings.Contains(v, "http · caddy") {
+		t.Errorf("a group shows its instances' domains:\n%s", v)
+	}
+}
+
+func TestDomainColumnGoesAndNothingOverflows(t *testing.T) {
+	// no domain anywhere: no column
+	m := loadedWith(t, withGroup(t), 160, 40)
+	m, _ = send(m, domainsMsg{rep: domains.Report{Processes: []domains.ProcessDomains{{Name: "api", Ports: []int{3000}, Domains: []domains.Domain{}}}}})
+	for _, l := range strings.Split(ansi.Strip(m.View()), "\n") {
+		if strings.Contains(l, "name") && strings.Contains(l, "status") && strings.Contains(l, "domain") {
+			t.Errorf("the domain column only shows when something has a domain: %q", l)
+		}
+	}
+	for _, size := range [][2]int{{44, 14}, {70, 20}, {100, 24}, {160, 40}, {240, 60}} {
+		m := withDomains(t, size[0], size[1])
+		for _, mode := range []string{"normal", "zoom", "group"} {
+			mm := m
+			switch mode {
+			case "zoom":
+				mm, _ = send(mm, key("z"))
+			case "group":
+				mm, _ = send(mm, key("G"), tea.KeyMsg{Type: tea.KeyLeft})
+			}
+			rows := strings.Split(mm.View(), "\n")
+			if len(rows) != size[1] {
+				t.Errorf("%dx%d %s: %d lines", size[0], size[1], mode, len(rows))
+			}
+			for i, l := range rows {
+				if w := ansi.StringWidth(ansi.Strip(l)); w > size[0] {
+					t.Errorf("%dx%d %s: line %d is %d wide", size[0], size[1], mode, i, w)
+				}
+			}
 		}
 	}
 }

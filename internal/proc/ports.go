@@ -3,6 +3,7 @@ package proc
 import (
 	"net"
 	"net/netip"
+	"sort"
 	"time"
 )
 
@@ -74,4 +75,27 @@ func (p *Process) restartWaiting(limit time.Duration) (time.Duration, error) {
 		return p.cmd != nil && p.status == StatusOnline
 	})
 	return time.Since(start), nil
+}
+
+// PortNumbers returns the TCP ports each running process, with everything it
+// started, listens on, by process name. Linux and macOS only; elsewhere the
+// map is empty.
+func (m *Manager) PortNumbers() map[string][]int {
+	out := map[string][]int{}
+	for _, in := range m.List() {
+		if in.PID <= 0 {
+			continue
+		}
+		seen := map[int]bool{}
+		var ports []int
+		for _, a := range ListeningPorts(in.PID) {
+			if p := int(a.Port()); !seen[p] {
+				seen[p] = true
+				ports = append(ports, p)
+			}
+		}
+		sort.Ints(ports)
+		out[in.Name] = ports
+	}
+	return out
 }
