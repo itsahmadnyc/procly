@@ -705,7 +705,7 @@ function changeMode(server, p) {
       if (mode === "cluster" && (!Number.isInteger(n) || n < 0 || n > 64)) return "Workers must be a whole number from 0 to 64.";
       if (mode === current && (mode === "fork" || n === (p.instances || 0))) return "It already runs that way.";
       const yes = await confirmDialog({ ic: "restart", tone: "warn", title: `Switch ${p.name} to ${mode}?`,
-        text: `procly restarts it in ${mode} mode${mode === "cluster" ? ` with ${n || "one per CPU"} workers` : ""}. It is down for a moment. If it cannot run that way, it keeps running as it is.`, ok: "Switch and restart" });
+        text: `procly restarts it in ${mode} mode${mode === "cluster" ? ` with ${n || "one per CPU"} workers` : ""}. It is down for a moment, then procly watches the new setup for up to a minute and puts the old one back if it does not work.`, ok: "Switch and restart" });
       if (!yes) return "";
       try {
         await api("POST", `${srvPath(server)}/processes/${encodeURIComponent(p.name)}/mode`, { mode, instances: mode === "cluster" ? n : 0 });
