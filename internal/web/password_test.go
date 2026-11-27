@@ -126,3 +126,26 @@ func TestModeRoute(t *testing.T) {
 		t.Fatalf("an unknown server: %d", r.code)
 	}
 }
+
+func TestScaleAndPreflightRoutes(t *testing.T) {
+	p := newPanel(t)
+	p.login()
+	if r := p.req(http.MethodPost, "/api/servers/local/processes/web/scale", `{"workers":3}`, false); r.code != http.StatusForbidden {
+		t.Fatalf("without the X-Procly header: %d", r.code)
+	}
+	for _, bad := range []string{`{"workers":0}`, `{"workers":9999}`, `nope`} {
+		if r := p.req(http.MethodPost, "/api/servers/local/processes/web/scale", bad, true); r.code != http.StatusBadRequest {
+			t.Errorf("%q: %d", bad, r.code)
+		}
+	}
+	if r := p.req(http.MethodPost, "/api/servers/local/processes/web/scale", `{"workers":2,"relative":true}`, true); r.code != http.StatusOK {
+		t.Fatalf("scale: %d %s", r.code, r.body)
+	}
+	if got := p.backend.recorded(); got[len(got)-1] != "scale web 2 true" {
+		t.Fatalf("the backend was told: %v", got)
+	}
+	r := p.req(http.MethodGet, "/api/servers/local/processes/web/preflight?mode=cluster&workers=2", "", false)
+	if r.code != http.StatusOK || !strings.Contains(r.body, "syncs the database") {
+		t.Fatalf("preflight: %d %s", r.code, r.body)
+	}
+}

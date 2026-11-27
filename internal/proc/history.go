@@ -22,6 +22,8 @@ const (
 	// HistoryOrphaned: a new daemon found the process still running after the
 	// daemon that started it died.
 	HistoryOrphaned = "orphaned"
+	// HistoryScaled: procly scale changed the number of workers.
+	HistoryScaled = "scaled"
 )
 
 // historyKeep bounds memory per process. A crash loop adds two items per

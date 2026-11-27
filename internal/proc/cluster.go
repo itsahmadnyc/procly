@@ -174,7 +174,15 @@ func launchCommand(s Spec, dir string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("writing the cluster launcher: %w", err)
 	}
-	parts := []string{"exec", shellQuote(cc.node), shellQuote(path), "--workers", fmt.Sprint(s.Workers())}
+	parts := []string{"exec", shellQuote(cc.node), shellQuote(path), "--workers", fmt.Sprint(s.Workers()),
+		"--status", shellQuote(clusterStatusPath(dir, s.Name)), "--ctl", shellQuote(clusterCtlPath(dir, s.Name))}
+	// max_memory is per worker in cluster mode (as in PM2): the launcher enforces it.
+	if n, _ := s.maxMemoryBytes(); n > 0 {
+		parts = append(parts, "--max-worker-memory", fmt.Sprint(n))
+	}
+	if s.ListenTimeoutMs > 0 {
+		parts = append(parts, "--listen-timeout", fmt.Sprint(s.ListenTimeoutMs))
+	}
 	for _, f := range cc.execArgv {
 		parts = append(parts, "--exec-argv", shellQuote(f))
 	}

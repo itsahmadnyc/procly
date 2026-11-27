@@ -3,6 +3,7 @@ package proc
 import (
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -102,7 +103,7 @@ func TestLauncherCommand(t *testing.T) {
 		t.Fatal(err)
 	}
 	path, _ := ensureLauncher(dir)
-	want := "exec node " + path + " --workers 4 --exec-argv --max-old-space-size=256 -- server.js --port 3000"
+	want := "exec node " + path + " --workers 4 --status " + clusterStatusPath(dir, "") + " --ctl " + clusterCtlPath(dir, "") + " --exec-argv --max-old-space-size=256 -- server.js --port 3000"
 	if cmd != want {
 		t.Fatalf("\n got %s\nwant %s", cmd, want)
 	}
@@ -280,7 +281,7 @@ func TestSetModeBetweenForkAndCluster(t *testing.T) {
 		t.Skip("node is not installed")
 	}
 	m, _ := newTestManager(t)
-	base := freePort(t)
+	base := freeRun(t, 3) // the three copies use base, base+1 and base+2
 	cwd := t.TempDir()
 	if err := os.WriteFile(filepath.Join(cwd, "app.js"), []byte(switchApp), 0o644); err != nil {
 		t.Fatal(err)
@@ -379,4 +380,30 @@ func TestSetModeKeepsAStoppedAppStopped(t *testing.T) {
 	if err != nil || len(infos) != 2 || infos[0].Status != StatusStopped {
 		t.Fatalf("and as a group too: %+v %v", infos, err)
 	}
+}
+
+// freeRun finds n free ports in a row and returns the first.
+func freeRun(t *testing.T, n int) uint16 {
+	t.Helper()
+	for try := 0; try < 50; try++ {
+		base := freePort(t)
+		var ls []net.Listener
+		ok := true
+		for i := 0; i < n; i++ {
+			l, err := net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(int(base)+i))
+			if err != nil {
+				ok = false
+				break
+			}
+			ls = append(ls, l)
+		}
+		for _, l := range ls {
+			l.Close()
+		}
+		if ok {
+			return base
+		}
+	}
+	t.Fatal("no run of free ports")
+	return 0
 }

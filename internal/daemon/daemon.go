@@ -191,6 +191,34 @@ func newHandler(m *proc.Manager, shutdown, detach func()) http.Handler {
 		infos, err := m.SetMode(r.PathValue("name"), req.Mode, req.Instances)
 		respond(w, infos, err)
 	})
+	mux.HandleFunc("POST /v1/processes/{name}/scale", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Workers  int  `json:"workers"`
+			Relative bool `json:"relative"`
+		}
+		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
+			writeError(w, fmt.Errorf("invalid request: %w", err))
+			return
+		}
+		in, err := m.Scale(r.PathValue("name"), req.Workers, req.Relative)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, in)
+	})
+	mux.HandleFunc("GET /v1/processes/{name}/preflight", func(w http.ResponseWriter, r *http.Request) {
+		workers, _ := strconv.Atoi(r.URL.Query().Get("workers"))
+		ws, err := m.PreflightMode(r.PathValue("name"), r.URL.Query().Get("mode"), workers)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		if ws == nil {
+			ws = []proc.Warning{}
+		}
+		writeJSON(w, http.StatusOK, ws)
+	})
 	mux.HandleFunc("DELETE /v1/processes/{name}", func(w http.ResponseWriter, r *http.Request) {
 		infos, err := m.Delete(r.PathValue("name"))
 		respond(w, infos, err)

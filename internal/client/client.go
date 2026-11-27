@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -39,7 +40,7 @@ func New() *Client {
 		},
 	}
 	// Stopping many processes can take a while (kill timeout is 5s each, in parallel).
-	return &Client{hc: &http.Client{Transport: tr, Timeout: 2 * time.Minute}}
+	return &Client{hc: &http.Client{Transport: tr, Timeout: 6 * time.Minute}} // a mode switch waits to see the new setup work
 }
 
 func (c *Client) Ping() (Ping, error) {
@@ -172,4 +173,16 @@ func (c *Client) call(ctx context.Context, method, path string, in, out any) err
 		return json.Unmarshal(data, out)
 	}
 	return nil
+}
+
+// Scale changes the workers of a cluster app: to n, or by n when relative.
+func (c *Client) Scale(target string, n int, relative bool) (proc.Info, error) {
+	var out proc.Info
+	return out, c.call(context.Background(), http.MethodPost, "/v1/processes/"+url.PathEscape(target)+"/scale", map[string]any{"workers": n, "relative": relative}, &out)
+}
+
+// Preflight says what to know before running an app in a mode.
+func (c *Client) Preflight(target, mode string, workers int) ([]proc.Warning, error) {
+	var out []proc.Warning
+	return out, c.call(context.Background(), http.MethodGet, fmt.Sprintf("/v1/processes/%s/preflight?mode=%s&workers=%d", url.PathEscape(target), url.QueryEscape(mode), workers), nil, &out)
 }
