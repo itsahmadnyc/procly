@@ -1063,8 +1063,8 @@ function pageHead({ crumbs, title, sub, actions }) {
       actions && h("div", { class: "page-actions" }, actions)));
 }
 
-function sectionHead(title, sub, right) {
-  return h("div", { class: "section-head" }, h("h2", { text: title }), sub && h("span", { class: "muted", text: sub }), right && h("div", { class: "right" }, right));
+function sectionHead(title, sub, right, ic) {
+  return h("div", { class: "section-head" }, ic && h("span", { class: "sec-ico" }, icon(ic, 15)), h("h2", { text: title }), sub && h("span", { class: "muted", text: sub }), right && h("div", { class: "right" }, right));
 }
 
 // The fleet chart: CPU or memory of everything running, over the last two
@@ -1084,18 +1084,19 @@ function drawFleet(card, force) {
   card.replaceChildren(h("div", { class: "card-title" }, h("h2", { text: "Resource usage" }), h("span", { class: "muted", text: "last " + Math.round((HISTORY * POLL_MS) / 60000) + " min" }), h("div", { class: "right" }, seg)), box);
   if (vals.length < 2) { box.append(emptyBox("events", "Collecting samples", "The chart fills in as the panel watches.")); return; }
   const W = 600, H = 150;
-  const { d, first, last } = sparkPath(vals, W, H, 8, { fromZero: true, minSpan: mode === "cpu" ? 5 : 1048576, slots: HISTORY });
+  const { d, first, last, hi } = sparkPath(vals, W, H, 10, { fromZero: true, minSpan: mode === "cpu" ? 5 : 1048576, slots: vals.length });
   const svg = svgEl("svg", { class: "chart fleet", viewBox: `0 0 ${W} ${H}`, preserveAspectRatio: "none" });
   svg.append(svgEl("line", { class: "grid", x1: 0, x2: W, y1: H / 2, y2: H / 2 }), svgEl("path", { class: "area", d: `${d} L${last[0]} ${H} L${first[0]} ${H} Z` }), svgEl("path", { class: "line", d }));
+  const nowV = vals[vals.length - 1];
+  card.querySelector(".card-title .muted").textContent = `now ${fmt(nowV)} · peak ${fmt(Math.max(...vals))}`;
+  box.append(h("span", { class: "fleet-max", text: fmt(hi) }), h("div", { class: "chart-axis fleet-axis" }, h("span", { text: fmtAgo((vals.length - 1) * POLL_MS) }), h("span", { text: "now" })));
   const rule = h("div", { class: "fleet-rule", hidden: true });
   const tip = h("div", { class: "fleet-tip", hidden: true });
-  box.append(svg, rule, tip);
+  box.prepend(svg); box.append(rule, tip);
   svg.addEventListener("pointermove", (e) => {
     const r = svg.getBoundingClientRect();
-    const slot = Math.round(((e.clientX - r.left) / r.width) * (HISTORY - 1));
-    const i = slot - (HISTORY - vals.length);
-    if (i < 0 || i >= vals.length) { rule.hidden = tip.hidden = true; return; }
-    const x = ((HISTORY - vals.length + i) / (HISTORY - 1)) * r.width;
+    const i = Math.min(vals.length - 1, Math.max(0, Math.round(((e.clientX - r.left) / r.width) * (vals.length - 1))));
+    const x = (i / (vals.length - 1)) * r.width;
     rule.hidden = tip.hidden = false;
     rule.style.left = x + "px";
     tip.style.left = Math.min(Math.max(x, 50), r.width - 50) + "px";
@@ -1132,14 +1133,14 @@ PAGES.overview = () => {
           h("div", {},
             refs.chart,
             refs.attention,
-            h("div", { class: "section" }, sectionHead("Servers", null, h("a", { class: "more", href: "#/servers" }, "Manage", icon("chevronRight"))),
+            h("div", { class: "section" }, sectionHead("Servers", null, h("a", { class: "more", href: "#/servers" }, "Manage", icon("chevronRight")), "servers"),
               h("div", { class: "card" }, h("table", { class: "table" },
                 h("thead", {}, h("tr", {},
                   h("th", { text: "Server" }), h("th", { class: "hide-sm", text: "Load" }), h("th", { class: "hide-sm", text: "Memory" }),
                   h("th", { class: "hide-md", text: "Disk" }), h("th", { text: "Processes" }))),
                 refs.servers))),
-            h("div", { class: "section" }, sectionHead("Busiest processes", "by CPU", h("a", { class: "more", href: `#/s/${encodeURIComponent(S.server)}/processes` }, "All processes", icon("chevronRight"))), refs.busy)),
-          h("div", {}, sectionHead("Activity", "across all servers"), refs.events))));
+            h("div", { class: "section" }, sectionHead("Busiest processes", "by CPU", h("a", { class: "more", href: `#/s/${encodeURIComponent(S.server)}/processes` }, "All processes", icon("chevronRight")), "cpu"), refs.busy)),
+          h("div", {}, sectionHead("Activity", "across all servers", null, "events"), refs.events))));
     },
     update() {
       const all = [];
@@ -1188,7 +1189,7 @@ PAGES.overview = () => {
         ["restarts", "Restarts", String(rs), several ? `on ${plural(S.servers.length, "server")}` : "since start", rs ? "warn" : "good", rs ? "Some crashes" : "Stable"],
       ];
       fill(refs.stats, ...cards.map(([k, label, value, sub2, t, chip]) => h("div", { class: "kpi-card" },
-        h("div", { class: "kpi-top" }, h("span", { class: "kpi-name", text: label }), h("span", { class: "chip " + t, text: chip })),
+        h("div", { class: "kpi-top" }, h("span", { class: "kpi-ico " + t }, icon(k === "restarts" ? "restart" : k, 18)), h("span", { class: "kpi-name", text: label }), h("span", { class: "chip " + t, text: chip })),
         h("div", { class: "kpi-big", text: value }), h("div", { class: "kpi-foot", text: sub2 }))));
       drawFleet(refs.chart);
 
@@ -1203,7 +1204,7 @@ PAGES.overview = () => {
             h("div", { class: "grow" }, h("div", { class: "title" }, h("b", { text: p.name }), h("span", { class: "muted", text: " " + why })), several && h("div", { class: "sub", text: serverLabel(s) })),
             statusEl(s, p)));
         }
-        fill(refs.attention, sectionHead("Needs attention", String(bad.length)), h("div", { class: "card" }, list));
+        fill(refs.attention, sectionHead("Needs attention", String(bad.length), null, "alert"), h("div", { class: "card" }, list));
       }
 
       fill(refs.servers, ...(S.servers.length ? S.servers : [{ name: "local", label: S.info.host, ok: true, local: true, by_status: {}, total: 0 }]).map((s) => serverRow(s, false)));
@@ -1218,7 +1219,7 @@ PAGES.overview = () => {
           const inf = eventInfo(e);
           return h("a", { class: "act-item", href: `#/s/${encodeURIComponent(s)}/p/${encodeURIComponent(p.name)}/events` },
             h("span", { class: "act-when", text: fmtAgo(e.ago_ms) }),
-            h("span", { class: "act-dot " + inf.tone }),
+            h("span", { class: "act-ico " + inf.tone }, icon(inf.ic, 13)),
             h("span", { class: "act-text" }, h("b", { text: p.name }), " " + inf.title(e).toLowerCase(),
               h("span", { class: "muted", text: [several && serverLabel(s), e.exit_code && `exit ${e.exit_code}`].filter(Boolean).join(" · ") })));
         })));
