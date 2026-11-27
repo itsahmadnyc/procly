@@ -88,8 +88,11 @@ hands the daemon over to the new binary:
 - The running daemon passes its list on and exits **without stopping your apps**.
 - A daemon from the new binary starts, and **every running app is restarted once, one at a
   time**: the app is stopped where it is and started again from its settings, and the next one
-  is not touched until it is up (until it passes its health check, if it has one; at most a
-  minute). The instances of a group roll, so the others keep serving.
+  is not touched until this one serves again: on Linux, until it accepts connections on the
+  TCP ports the old process listened on (found in `/proc`, nothing to configure), and until it
+  passes its health check if it has one; at most a minute. An app that listens on nothing only
+  needs to be running. On macOS only the health check is waited for. The instances of a group
+  roll, so the others keep serving.
 - **Stopped apps stay stopped**, still in the list, and **your saved list is not changed**
   (`procly save` is for you to decide).
 - Between the old daemon leaving and an app's turn, that app keeps running but nothing
@@ -485,7 +488,9 @@ apps that listen on different ports behind a proxy. They are four ordinary proce
 `queue-1` to `queue-4`, each with its own logs, and each gets `PROCLY_INSTANCE` (0 to 3) and
 `PROCLY_INSTANCES` (4) in its environment. `stop`, `restart`, `reload` and `delete` with the
 base name (`procly restart queue`) act on all of them, and a group restart goes **one instance
-at a time**, so the others keep serving while one restarts. Name one (`queue-2`, or its id) to
+at a time**, so the others keep serving while one restarts: on Linux each must accept
+connections again on the ports it listened on before the next goes down (up to 30 seconds
+each, 60 in all). Name one (`queue-2`, or its id) to
 act on just that one. `ls` shows them grouped under a summary line, and so does the panel (a row
 that opens, with one confirmation that says how many processes it affects); `ls --json` stays
 flat, with `group`, `index` and `instances` on each. `save` and `resurrect` keep the group.

@@ -100,21 +100,8 @@ func groupMemory(groups []int) map[int]int64 {
 		if err != nil {
 			continue
 		}
-		st, err := os.ReadFile("/proc/" + e.Name() + "/stat")
-		if err != nil {
-			continue
-		}
-		s := string(st)
-		i := strings.LastIndexByte(s, ')')
-		if i < 0 {
-			continue
-		}
-		f := strings.Fields(s[i+1:])
-		if len(f) < 3 { // f[0] state, f[1] ppid, f[2] process group
-			continue
-		}
-		pgrp, err := strconv.Atoi(f[2])
-		if err != nil || !want[pgrp] {
+		pgrp, ok := pgrpOf(pid)
+		if !ok || !want[pgrp] {
 			continue
 		}
 		sm, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/statm")
