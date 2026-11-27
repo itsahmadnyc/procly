@@ -2,7 +2,7 @@
 
 ## v0.5.3
 
-- **Overview polish**: icons on every KPI card (tinted by state), on section headings and on each activity entry; the resource chart now fills its whole width from the first samples, in green, with the current and peak value in its title and the scale in the corner.
+- **Overview polish**: the resource chart fills its whole width from the first samples, in green, with the current and peak value in its title and the scale in the corner. Decorative icon tiles were tried and removed: they looked generated.
 
 ## v0.5.2
 

@@ -56,4 +56,4 @@ The first redesign was deliberately plain. Feedback was that the panel should fe
 - **Settings** gains a log terminal section (ten color themes in the style of Termius/iTerm, text size, wrap, a live preview), password change and mode switching. Long lines wrap by default.
 - **Every change asks first**: restart, stop, delete, mode switch, password change, saving the list. The TUI asks in its footer (`y` confirms, anything else cancels).
 
-- **Icons** (v0.5.3): KPI cards, section headings and activity entries carry a small icon in a soft tinted circle or square. The tint follows state (green, amber, red), so an icon never carries state alone: the chip or word is beside it.
+- **No decorative icons** (v0.5.3 feedback): tinted icon squares and circles on cards, headings and activity read as generated, so they are out. Cards carry a word chip for state; activity uses a small state dot.

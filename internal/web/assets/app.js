@@ -1064,7 +1064,7 @@ function pageHead({ crumbs, title, sub, actions }) {
 }
 
 function sectionHead(title, sub, right, ic) {
-  return h("div", { class: "section-head" }, ic && h("span", { class: "sec-ico" }, icon(ic, 15)), h("h2", { text: title }), sub && h("span", { class: "muted", text: sub }), right && h("div", { class: "right" }, right));
+  return h("div", { class: "section-head" }, h("h2", { text: title }), sub && h("span", { class: "muted", text: sub }), right && h("div", { class: "right" }, right));
 }
 
 // The fleet chart: CPU or memory of everything running, over the last two
@@ -1189,7 +1189,7 @@ PAGES.overview = () => {
         ["restarts", "Restarts", String(rs), several ? `on ${plural(S.servers.length, "server")}` : "since start", rs ? "warn" : "good", rs ? "Some crashes" : "Stable"],
       ];
       fill(refs.stats, ...cards.map(([k, label, value, sub2, t, chip]) => h("div", { class: "kpi-card" },
-        h("div", { class: "kpi-top" }, h("span", { class: "kpi-ico " + t }, icon(k === "restarts" ? "restart" : k, 18)), h("span", { class: "kpi-name", text: label }), h("span", { class: "chip " + t, text: chip })),
+        h("div", { class: "kpi-top" }, h("span", { class: "kpi-name", text: label }), h("span", { class: "chip " + t, text: chip })),
         h("div", { class: "kpi-big", text: value }), h("div", { class: "kpi-foot", text: sub2 }))));
       drawFleet(refs.chart);
 
@@ -1219,7 +1219,7 @@ PAGES.overview = () => {
           const inf = eventInfo(e);
           return h("a", { class: "act-item", href: `#/s/${encodeURIComponent(s)}/p/${encodeURIComponent(p.name)}/events` },
             h("span", { class: "act-when", text: fmtAgo(e.ago_ms) }),
-            h("span", { class: "act-ico " + inf.tone }, icon(inf.ic, 13)),
+            h("span", { class: "act-dot " + inf.tone }),
             h("span", { class: "act-text" }, h("b", { text: p.name }), " " + inf.title(e).toLowerCase(),
               h("span", { class: "muted", text: [several && serverLabel(s), e.exit_code && `exit ${e.exit_code}`].filter(Boolean).join(" · ") })));
         })));
