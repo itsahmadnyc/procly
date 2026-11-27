@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.4.6
+
+A redesigned web panel.
+
+- **Answers first.** The overview opens with one sentence of state ("All 6 processes are running", "1 of 6 needs attention") and the few figures that matter beside it. What needs attention comes next, then the servers, the busiest processes and the recent activity as a plain log. The row of identical big-number tiles is gone.
+- **The whole window.** No page has a maximum width any more. The panel used to stop at 1480 px and sit in a strip on the left of a wide screen; now the columns widen with the window, and the gutter grows from 1800 px up. A test keeps it that way.
+- **A calmer look.** The sidebar is a notch dimmer than the page and its selected item is a quiet background. Lines between rows are faint hairlines, nothing sits in a bordered box inside another, icons are fewer and smaller, and the colored icon tiles are gone. Labels are sentence case, not small uppercase letters. Numbers in tables use tabular figures in the interface font; monospace is kept for commands, paths and logs.
+- **Denser tables.** One line per row at 38 px: the name and its command share the line. The health column is only drawn when something has a health check. CPU and memory have a short bar (memory against `max_memory` when there is one). The row's restart, stop and menu buttons appear on hover and keyboard focus, and always on touch screens. A line under the table sums it up, and the header stays in place when the list scrolls. A process name is a real link, so it works from the keyboard and opens in a new tab.
+- **A process page with room.** CPU and memory charts sit side by side across the page with an area under the line and a time axis, uptime, restarts and health in a row above them, then the details and the recent events as a timeline of dots. A process that never ran does not draw empty charts. The Configuration tab and Settings use two columns.
+- **Loading and small screens.** Tables show rows with the shape of what is coming while they load. Below 720 px a row is two lines (name and command, then state and number) at 52 px, with a 40 px menu button.
+- The design and the research behind it are in `docs/web-design.md`.
+
 ## v0.4.5
 
 `procly monit`: scrolling the logs no longer lags, most of all over SSH.

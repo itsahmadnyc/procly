@@ -15,7 +15,7 @@ across as many servers as you have.
 
 <picture>
   <source media="(prefers-color-scheme: light)" srcset="docs/web-overview-light.png">
-  <img alt="procly web panel overview: every server, what needs attention, recent events" src="docs/web-overview-dark.png">
+  <img alt="procly web panel overview: whether anything is wrong, what needs attention, every server, recent activity" src="docs/web-overview-dark.png">
 </picture>
 
 ## What you get

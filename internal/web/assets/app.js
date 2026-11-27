@@ -328,7 +328,7 @@ function sparkPath(vals, w, hgt, pad, { fromZero, minSpan, slots }) {
   const step = w / (slots - 1);
   const x0 = w - (vals.length - 1) * step;
   const pts = vals.map((v, i) => [x0 + i * step, hgt - pad - ((v - lo) / span) * (hgt - pad * 2)]);
-  return { d: pts.map(([x, y], i) => (i ? "L" : "M") + x.toFixed(2) + " " + y.toFixed(2)).join(" "), last: pts[pts.length - 1], hi: lo + span };
+  return { d: pts.map(([x, y], i) => (i ? "L" : "M") + x.toFixed(2) + " " + y.toFixed(2)).join(" "), first: pts[0], last: pts[pts.length - 1], hi: lo + span };
 }
 
 function svgEl(tag, attrs) {
@@ -337,38 +337,33 @@ function svgEl(tag, attrs) {
   return e;
 }
 
-function miniSpark(vals) {
-  const svg = svgEl("svg", { class: "mini", viewBox: "0 0 56 18", preserveAspectRatio: "none", "aria-hidden": "true" });
-  svg.append(svgEl("line", { class: "track", x1: 0, x2: 56, y1: 17.5, y2: 17.5 }));
-  if (vals.length > 1) svg.append(svgEl("path", { d: sparkPath(vals.slice(-24), 56, 18, 2, { fromZero: true, minSpan: 10, slots: 24 }).d }));
-  return svg;
-}
-
-// A chart inside a .kpi: line, dashed midline, a dot on the newest sample
-// and the scale's top value in the corner.
-function drawChart(kpi, vals, opts) {
-  let svg = kpi.querySelector(".chart");
+// A chart inside a .chart-card: the line with a soft area under it, a faint
+// midline, a dot on the newest sample, the scale's top value in the corner and
+// the time span under it.
+function drawChart(card, vals, opts) {
+  let svg = card.querySelector(".chart");
   if (!svg) {
     svg = svgEl("svg", { class: "chart", viewBox: "0 0 200 56", preserveAspectRatio: "none", "aria-hidden": "true" });
-    kpi.append(svg, h("span", { class: "chart-max" }), h("span", { class: "chart-dot", hidden: true }));
+    card.append(svg, h("span", { class: "chart-max" }), h("span", { class: "chart-dot", hidden: true }),
+      h("div", { class: "chart-axis", "aria-hidden": "true" }, h("span", { text: `${Math.round((HISTORY * POLL_MS) / 60000)} min ago` }), h("span", { text: "now" })));
   }
-  fill(svg, 
+  fill(svg,
     svgEl("line", { class: "grid", x1: 0, x2: 200, y1: 28, y2: 28 }),
     svgEl("line", { class: "base", x1: 0, x2: 200, y1: 55.5, y2: 55.5 }),
   );
-  const dot = kpi.querySelector(".chart-dot");
-  const max = kpi.querySelector(".chart-max");
+  const dot = card.querySelector(".chart-dot");
+  const max = card.querySelector(".chart-max");
   if (vals.length < 2) { dot.hidden = true; max.textContent = ""; return; }
-  const { d, last, hi } = sparkPath(vals, 200, 56, 3, { ...opts, slots: HISTORY });
-  svg.append(svgEl("path", { class: "line", d }));
+  const { d, first, last, hi } = sparkPath(vals, 200, 56, 3, { ...opts, slots: HISTORY });
+  svg.append(svgEl("path", { class: "area", d: `${d} L${last[0].toFixed(2)} 55.5 L${first[0].toFixed(2)} 55.5 Z` }), svgEl("path", { class: "line", d }));
   dot.hidden = false;
   dot.style.top = `${svg.offsetTop + (last[1] / 56) * svg.clientHeight}px`;
   max.textContent = opts.label(hi);
 }
 
-function kpi(label, ic, extra) {
-  return h("div", { class: "kpi" + (extra ? " " + extra : "") },
-    h("div", { class: "kpi-label" }, ic && icon(ic), label),
+function chartCard(label) {
+  return h("div", { class: "chart-card" },
+    h("div", { class: "kpi-label", text: label }),
     h("div", { class: "kpi-value" }),
     h("div", { class: "kpi-sub" }));
 }
@@ -378,6 +373,17 @@ function setKpi(el, value, sub, tone) {
   v.className = "kpi-value" + (tone ? " " + tone : "");
   if (value instanceof Node) fill(v, value); else v.textContent = value;
   el.querySelector(".kpi-sub").textContent = sub || "";
+}
+
+// A figure with its label above it. Stats sit in a row, not in tiles.
+function stat(label) {
+  return h("div", {}, h("dt", { text: label }), h("dd"));
+}
+
+function setStat(el, value, sub, tone) {
+  const dd = el.querySelector("dd");
+  dd.className = tone || "";
+  fill(dd, value instanceof Node ? value : document.createTextNode(String(value)), sub ? h("small", { text: sub }) : null);
 }
 
 function meter(label, ic, used, total, text) {
@@ -877,105 +883,140 @@ const PAGES = {};
 
 // ----- overview -----
 
+// The overview answers one question first: is anything wrong? A sentence says
+// so, the figures that matter sit beside it, then what needs attention, the
+// servers, and what has happened lately.
 PAGES.overview = () => {
   let refs;
   return {
     mount(root) {
       document.title = "Overview · procly";
       refs = {
-        sub: h("span"),
-        online: kpi("Online", "check"), attention: kpi("Need attention", "alert"),
-        cpu: kpi("CPU", "cpu"), mem: kpi("Memory", "memory"), restarts: kpi("Restarts", "restart"),
-        servers: h("div", { class: "server-grid" }),
-        issues: h("div", { class: "card" }),
+        state: h("div", { class: "band-state" }),
+        stats: h("dl", { class: "stats" }),
+        attention: h("div", { class: "attention-slot" }),
+        servers: h("tbody"),
         events: h("div", { class: "card" }),
+        busy: h("div", { class: "card" }),
       };
       root.append(h("div", { class: "page" },
-        pageHead({ title: "Overview", sub: refs.sub }),
-        h("div", { class: "card kpis" }, refs.online, refs.attention, refs.cpu, refs.mem, refs.restarts),
-        h("div", { class: "grid-2 section" },
-          h("div", {}, sectionHead("Servers", null, h("a", { class: "more", href: "#/servers" }, "All servers", icon("chevronRight"))), refs.servers),
+        h("div", { class: "band" }, refs.state, refs.stats),
+        h("div", { class: "cols" },
           h("div", {},
-            sectionHead("Needs attention"), refs.issues,
-            h("div", { class: "section" }, sectionHead("Recent events", "across all servers"), refs.events)))));
+            refs.attention,
+            h("div", { class: "section" }, sectionHead("Servers", null, h("a", { class: "more", href: "#/servers" }, "Manage", icon("chevronRight"))),
+              h("div", { class: "card" }, h("table", { class: "table" },
+                h("thead", {}, h("tr", {},
+                  h("th", { text: "Server" }), h("th", { class: "hide-sm", text: "Load" }), h("th", { class: "hide-sm", text: "Memory" }),
+                  h("th", { class: "hide-md", text: "Disk" }), h("th", { text: "Processes" }))),
+                refs.servers))),
+            h("div", { class: "section" }, sectionHead("Busiest processes", "by CPU", h("a", { class: "more", href: `#/s/${encodeURIComponent(S.server)}/processes` }, "All processes", icon("chevronRight"))), refs.busy)),
+          h("div", {}, sectionHead("Activity", "across all servers"), refs.events))));
     },
     update() {
       const all = [];
       for (const s of S.servers) if (s.ok) for (const p of procsOf(s.name)) all.push({ s: s.name, p });
       const c = countStatus(all.map((x) => x.p));
       const total = all.length;
-      refs.sub.textContent = `${plural(S.servers.length || 1, "server")} · ${plural(total, "process", "processes")}`;
-      setKpi(refs.online, h("span", {}, String(c.online), h("small", { text: "/ " + total })), total ? `${Math.round((c.online / total) * 100)}% running` : "nothing running yet", c.online && c.online === total ? "good" : "");
       const bad = all.filter((x) => needsAttention(x.p));
-      setKpi(refs.attention, String(bad.length), bad.length ? bad.slice(0, 3).map((x) => x.p.name).join(", ") : "all good", bad.length ? "bad" : "");
+      const down = S.servers.filter((s) => !s.ok);
+      const several = S.servers.length > 1;
+
+      // the answer
+      let tone = "", title, sub;
+      if (down.length) {
+        tone = "bad";
+        title = down.length === 1 ? `Can't reach ${serverLabel(down[0].name)}` : `Can't reach ${down.length} servers`;
+        sub = bad.length ? `${plural(bad.length, "process needs", "processes need")} attention on the others` : down.map((s) => s.error).filter(Boolean)[0] || "";
+      } else if (!total) {
+        tone = "idle";
+        title = "No processes yet";
+        sub = "Start one from the Processes page, or in a terminal: procly start app.js";
+      } else if (bad.length) {
+        tone = bad.some((x) => x.p.status === "errored" || x.p.health === "unhealthy") ? "bad" : "warn";
+        title = `${bad.length} of ${total} ${bad.length === 1 ? "needs" : "need"} attention`;
+        sub = bad.slice(0, 3).map((x) => x.p.name).join(", ") + (bad.length > 3 ? ` and ${bad.length - 3} more` : "");
+      } else if (c.online === total) {
+        title = total === 1 ? "The process is running" : `All ${total} processes are running`;
+        sub = several ? `on ${plural(S.servers.length, "server")}` : "";
+      } else {
+        title = `${c.online} of ${total} running`;
+        sub = plural(c.stopped, "process is", "processes are") + " stopped";
+      }
+      fill(refs.state, h("i", { class: "dot " + tone }), h("div", {}, h("h1", { text: title }), sub && h("div", { class: "band-sub", text: sub })));
+
       const up = all.filter((x) => x.p.pid);
-      setKpi(refs.cpu, up.reduce((a, x) => a + x.p.cpu, 0).toFixed(1) + "%", `across ${plural(up.length, "process", "processes")}`);
-      setKpi(refs.mem, fmtBytes(up.reduce((a, x) => a + x.p.memory, 0)), "used by processes");
       const rs = all.reduce((a, x) => a + x.p.restarts, 0);
-      setKpi(refs.restarts, String(rs), rs ? "since procly started them" : "no restarts", rs ? "warn" : "");
+      const stats = [
+        several && ["Servers", `${okServers().length}/${S.servers.length}`, "", down.length ? "bad" : ""],
+        ["CPU", up.reduce((a, x) => a + x.p.cpu, 0).toFixed(1) + "%", ""],
+        ["Memory", fmtBytes(up.reduce((a, x) => a + x.p.memory, 0)), ""],
+        ["Restarts", String(rs), "", rs ? "warn" : ""],
+      ].filter(Boolean);
+      fill(refs.stats, ...stats.map(([label, value, subText, t]) => { const el = stat(label); setStat(el, value, subText, t); return el; }));
 
-      fill(refs.servers, ...(S.servers.length ? S.servers : [{ name: "local", label: S.info.host, ok: true, local: true, by_status: {}, total: 0 }]).map(serverCard));
-
-      const issues = h("div");
+      // what needs attention, only when something does
       if (!bad.length) {
-        issues.append(emptyBox("check", "Everything is running", "Crashed, restarting or unhealthy processes show up here."));
+        fill(refs.attention);
       } else {
         const list = h("div", { class: "list" });
         for (const { s, p } of bad) {
           const why = p.status === "errored" ? "gave up after " + plural(p.restarts, "restart") : p.status === "waiting" ? "crashed, restarting" : p.status === "orphaned" ? "left over from a daemon that died" : "health check failing";
           list.append(h("a", { class: "list-item", href: `#/s/${encodeURIComponent(s)}/p/${encodeURIComponent(p.name)}` },
-            h("span", { class: "ev-icon " + (p.status === "waiting" || p.status === "orphaned" ? "warn" : "bad") }, icon(p.status === "waiting" ? "restart" : "alert")),
-            h("div", { class: "grow" }, h("div", { class: "title" }, h("b", { text: p.name })), h("div", { class: "sub", text: `${serverLabel(s)} · ${why}` })),
+            h("div", { class: "grow" }, h("div", { class: "title" }, h("b", { text: p.name }), h("span", { class: "muted", text: " " + why })), several && h("div", { class: "sub", text: serverLabel(s) })),
             statusEl(s, p)));
         }
-        issues.append(list);
+        fill(refs.attention, sectionHead("Needs attention", String(bad.length)), h("div", { class: "card" }, list));
       }
-      fill(refs.issues, ...issues.childNodes);
+
+      fill(refs.servers, ...(S.servers.length ? S.servers : [{ name: "local", label: S.info.host, ok: true, local: true, by_status: {}, total: 0 }]).map((s) => serverRow(s, false)));
 
       const evs = [];
       for (const { s, p } of all) for (const e of p.events || []) evs.push({ s, p, e });
       evs.sort((a, b) => a.e.ago_ms - b.e.ago_ms);
-      const events = h("div");
       if (!evs.length) {
-        events.append(emptyBox("events", "No events yet", "Starts, stops, crashes and failed health checks are listed here."));
+        fill(refs.events, emptyBox("events", "Nothing has happened yet", "Starts, stops, crashes and failed health checks are listed here."));
       } else {
-        const list = h("div", { class: "list" });
-        for (const { s, p, e } of evs.slice(0, 8)) {
+        fill(refs.events, h("div", { class: "act" }, evs.slice(0, 14).map(({ s, p, e }) => {
           const inf = eventInfo(e);
-          list.append(h("a", { class: "list-item", href: `#/s/${encodeURIComponent(s)}/p/${encodeURIComponent(p.name)}/events` },
-            h("span", { class: "ev-icon " + inf.tone }, icon(inf.ic)),
-            h("div", { class: "grow" },
-              h("div", { class: "title" }, h("b", { text: p.name }), " " + inf.title(e).toLowerCase()),
-              h("div", { class: "sub", text: serverLabel(s) + (e.exit_code ? ` · exit ${e.exit_code}` : "") })),
-            h("span", { class: "when", text: fmtAgo(e.ago_ms) })));
-        }
-        events.append(list);
+          return h("a", { class: "act-item", href: `#/s/${encodeURIComponent(s)}/p/${encodeURIComponent(p.name)}/events` },
+            h("span", { class: "act-when", text: fmtAgo(e.ago_ms) }),
+            h("span", { class: "act-dot " + inf.tone }),
+            h("span", { class: "act-text" }, h("b", { text: p.name }), " " + inf.title(e).toLowerCase(),
+              h("span", { class: "muted", text: [several && serverLabel(s), e.exit_code && `exit ${e.exit_code}`].filter(Boolean).join(" · ") })));
+        })));
       }
-      fill(refs.events, ...events.childNodes);
+
+      const top = [...up].sort((a, b) => b.p.cpu - a.p.cpu || b.p.memory - a.p.memory).slice(0, 6);
+      fill(refs.busy, top.length
+        ? h("div", { class: "list" }, top.map(({ s, p }) => h("a", { class: "list-item", href: `#/s/${encodeURIComponent(s)}/p/${encodeURIComponent(p.name)}` },
+          h("div", { class: "grow inline" }, h("b", { text: p.name }), h("span", { class: "mono", text: p.command })),
+          h("span", { class: "num muted", text: fmtBytes(p.memory) }), h("span", { class: "num", text: p.cpu.toFixed(1) + "%" }))))
+        : emptyBox("processes", "Nothing running", "Running processes are listed here by CPU."));
     },
   };
 };
 
-function serverCard(s) {
-  const sys = S.system.get(s.name);
-  const where = s.local ? "this server" : s.url === "tunnel" ? "connects in through the hub" : s.url;
-  const card = h("a", { class: "card server-card", href: `#/servers/${encodeURIComponent(s.name)}` },
-    h("div", { class: "sc-head" },
-      h("span", { class: "dot" + serverDot(s) }),
-      h("div", { class: "sc-title" }, h("div", { class: "sc-name", text: s.label }), h("div", { class: "sc-where", text: where })),
-      sys && sys.data && h("span", { class: "badge", text: sys.data.distro ? sys.data.distro.replace(/ LTS$/, "") : sys.data.os })));
-  if (!s.ok) {
-    card.append(h("div", { class: "sc-error", text: s.error || "unreachable" }));
-  } else if (sys && sys.data) {
-    card.append(h("div", { class: "sc-meters" }, systemMeters(sys.data)));
-  } else if (sys && sys.error) {
-    card.append(h("div", { class: "sc-error muted", text: sys.error }));
-  } else {
-    card.append(h("div", { class: "sc-meters" }, meter("Load", "cpu", 0, 0, "…"), meter("Mem", "memory", 0, 0, "…"), meter("Disk", "disk", 0, 0, "…")));
-  }
+// One server as a table row: the overview shows the short form, the servers
+// page the full one.
+function serverRow(s, full) {
+  const sys = (S.system.get(s.name) || {}).data;
   const c = s.ok ? (S.procs.has(s.name) ? countStatus(procsOf(s.name)) : s.by_status) : {};
-  card.append(h("div", { class: "sc-foot" }, healthBar(c), countsEl(c)));
-  return card;
+  const where = s.local ? "this server" : s.url === "tunnel" ? "tunnel through the hub" : s.url;
+  const m = sys ? systemMeters(sys, true) : [];
+  const dash = h("span", { class: "dim", text: "–" });
+  const cells = [
+    h("td", {}, h("div", { class: "cell-server" }, h("i", { class: "dot" + serverDot(s) }), h("div", { class: "cell-name" }, h("b", { text: s.label }), h("span", { text: s.ok ? where : s.error || "unreachable", title: s.error || where })))),
+    full && h("td", {}, h("span", { class: "status " + (s.ok ? "online" : "down"), text: s.ok ? "connected" : "unreachable", title: s.error || "" })),
+    full && h("td", { class: "hide-md" }, sys ? h("div", { class: "cell-name" }, h("b", { text: sys.distro || sys.os }), h("span", { text: `${sys.arch} · ${plural(sys.cpus, "core")} · procly ${shortVersion(sys.version)}` })) : dash.cloneNode(true)),
+    h("td", { class: "hide-sm meter-cell" }, m[0] || dash.cloneNode(true)),
+    h("td", { class: "hide-sm meter-cell" }, m[1] || dash.cloneNode(true)),
+    h("td", { class: (full ? "hide-lg" : "hide-md") + " meter-cell" }, m[2] || dash.cloneNode(true)),
+    full && h("td", { class: "r hide-md num" + (sys ? "" : " dim"), text: sys ? fmtUptime(sys.uptime_s * 1000) : "–" }),
+    h("td", {}, h("div", { class: "proc-cell" }, healthBar(c), h("span", { class: "num", text: s.ok ? String(s.total) : "–" }))),
+    full && h("td", { class: "r" }, h("span", { class: "dim" }, icon("chevronRight"))),
+  ].filter(Boolean);
+  return h("tr", { class: "click", "data-key": "s:" + s.name, onclick: () => go(`#/servers/${encodeURIComponent(s.name)}`) }, ...cells);
 }
 
 // ----- processes -----
@@ -990,8 +1031,10 @@ PAGES.processes = () => {
         search: h("input", { type: "search", placeholder: "Filter by name or command", "aria-label": "Filter processes", spellcheck: "false", autocomplete: "off" }),
         seg: h("div", { class: "seg", role: "group", "aria-label": "Show" }),
         shown: h("span", { class: "muted mono" }),
+        table: h("table", { class: "table" }),
         body: h("tbody"),
         empty: h("div"),
+        foot: h("div", { class: "sumline" }),
         actions: h("div", { class: "page-actions" }),
       };
       refs.search.addEventListener("input", () => { filter = refs.search.value; this.update(); });
@@ -1007,11 +1050,13 @@ PAGES.processes = () => {
           h("div", { class: "table-wrap" },
             h("table", { class: "table" },
               h("thead", {}, h("tr", {},
-                h("th", { text: "Name" }), h("th", { text: "Status" }), h("th", { class: "hide-md", text: "Health" }),
+                h("th", { text: "Name" }), h("th", { text: "Status" }), h("th", { class: "col-health hide-md", text: "Health" }),
                 h("th", { class: "r", text: "CPU" }), h("th", { class: "r hide-sm", text: "Memory" }), h("th", { class: "r hide-sm", text: "Uptime" }),
-                h("th", { class: "r hide-sm", text: "Restarts" }), h("th", { class: "r" }, h("span", { class: "hide-sm", text: "Actions" })))),
+                h("th", { class: "r hide-sm", text: "Restarts" }), h("th", { class: "r" }, h("span", { class: "visually-hidden", text: "Actions" })))),
               refs.body)),
-          refs.empty)));
+          refs.empty,
+          refs.foot)));
+      refs.table = root.querySelector(".table");
     },
     route() { this.update(); },
     keys(e) {
@@ -1056,7 +1101,20 @@ PAGES.processes = () => {
         rows.push(groupRow(srv, p.group, everyone, open, () => { toggleExpanded(srv, p.group); this.update(); }));
         if (open) members.forEach((m) => rows.push(procRow(srv, m, true)));
       }
-      fill(refs.body, ...rows);
+      const anyHealth = list.some((p) => p.health_check);
+      refs.table.classList.toggle("no-health", !anyHealth);
+      if (!entry) { // loading: rows with the shape of what is coming
+        fill(refs.body, ...[62, 48, 55, 40].map((w) => { const i = h("i"); i.style.width = w + "%"; return h("tr", { class: "skel" }, h("td", { colspan: "8" }, i)); }));
+      } else {
+        fill(refs.body, ...rows);
+      }
+      const up = list.filter((p) => p.pid > 0), restarts = list.reduce((a, p) => a + p.restarts, 0);
+      fill(refs.foot,
+        h("span", {}, h("b", { text: c.online }), " running"),
+        issues > 0 && h("span", { class: "bad" }, h("b", { text: issues }), issues === 1 ? " needs attention" : " need attention"),
+        c.stopped > 0 && h("span", {}, h("b", { text: c.stopped }), " stopped"),
+        h("span", { class: "right", text: `CPU ${up.reduce((a, p) => a + p.cpu, 0).toFixed(1)}% · ${fmtBytes(up.reduce((a, p) => a + p.memory, 0))} · ${plural(restarts, "restart")}` }));
+      refs.foot.hidden = !list.length;
       const emptyBoxes = h("div");
       if (entry && entry.error) emptyBoxes.append(emptyBox("alert", `Can't reach ${serverLabel(srv)}`, entry.error));
       else if (entry && !list.length) {
@@ -1064,7 +1122,6 @@ PAGES.processes = () => {
           srv === "local" ? "Start one with New process, or from a terminal on this server:" : "Start one from a terminal on that server:",
           cmdline("procly start app.js --name api")));
       } else if (list.length && !vis.length) emptyBoxes.append(emptyBox("search", "Nothing matches", "Try another filter."));
-      else if (!entry) emptyBoxes.append(emptyBox("clock", "Loading…"));
       fill(refs.empty, ...emptyBoxes.childNodes);
     },
   };
@@ -1078,6 +1135,14 @@ function toggleExpanded(server, group) {
   const set = expandedSet(), k = expandedKey(server, group);
   set.has(k) ? set.delete(k) : set.add(k);
   store("procly.expanded", JSON.stringify([...set]));
+}
+
+// A number with a short bar beside it. Without a bar the space is kept, so a
+// column of numbers stays lined up.
+function meterEl(text, frac) {
+  const bar = h("span", { class: "mbar" + (frac == null ? " none" : frac >= 0.9 ? " bad" : frac >= 0.7 ? " warn" : "") }, h("i"));
+  bar.firstChild.style.width = (Math.min(Math.max(frac || 0, 0), 1) * 100).toFixed(0) + "%";
+  return h("div", { class: "cell-meter" }, h("span", { text }), bar);
 }
 
 // groupSummary says how the instances of a group are doing, as one status.
@@ -1103,9 +1168,9 @@ function groupRow(server, group, members, open, onToggle) {
     h("td", {}, h("div", { class: "group-name" }, h("span", { class: "chev" + (open ? " open" : "") }, icon("chevronRight")),
       h("div", { class: "cell-name" }, h("b", { text: group, title: group }), h("span", { text: `${n} instances · ${members[0].command}`, title: members[0].command })))),
     h("td", {}, busy ? h("span", { class: "status waiting", text: progressive[S.busy.get(key(server, group))] } ) : h("span", { class: "status " + sum.cls, text: sum.text })),
-    h("td", { class: "hide-md" }, h("span", { class: "health-ic none", text: members.some((p) => p.health === "unhealthy") ? "unhealthy" : "–" })),
-    h("td", { class: "num r" + (up.length ? "" : " dim"), text: up.length ? up.reduce((a, p) => a + p.cpu, 0).toFixed(1) + "%" : "–" }),
-    h("td", { class: "num r hide-sm" + (up.length ? "" : " dim"), text: up.length ? fmtBytes(up.reduce((a, p) => a + p.memory, 0)) : "–" }),
+    h("td", { class: "col-health hide-md" }, h("span", { class: "health-ic none", text: members.some((p) => p.health === "unhealthy") ? "unhealthy" : "–" })),
+    h("td", { class: "num r" + (up.length ? "" : " dim") }, meterEl(up.length ? up.reduce((a, p) => a + p.cpu, 0).toFixed(1) + "%" : "–", null)),
+    h("td", { class: "num r hide-sm" + (up.length ? "" : " dim") }, meterEl(up.length ? fmtBytes(up.reduce((a, p) => a + p.memory, 0)) : "–", null)),
     h("td", { class: "num r hide-sm dim", text: "–" }),
     h("td", { class: "num r hide-sm" + (members.some((p) => p.restarts) ? " warn" : " dim"), text: members.reduce((a, p) => a + p.restarts, 0) }),
     h("td", {}, h("div", { class: "cell-actions" },
@@ -1129,14 +1194,13 @@ function groupMenu(server, group, members) {
 function procRow(server, p, child) {
   const href = `#/s/${encodeURIComponent(server)}/p/${encodeURIComponent(p.name)}`;
   const up = p.pid > 0;
-  const hst = S.hist.get(key(server, p.name));
   const busy = S.busy.has(key(server, p.name));
   const tr = h("tr", { class: "click" + (child ? " child-row" : ""), "data-key": "p:" + p.name, onclick: () => go(href) },
-    h("td", {}, h("div", { class: "cell-name" }, h("b", { text: p.name, title: p.name }), h("span", { text: p.command, title: p.command }))),
+    h("td", {}, h("div", { class: "cell-name" }, h("a", { class: "name", href, text: p.name, title: p.name }), h("span", { text: p.command, title: p.command }))),
     h("td", {}, statusEl(server, p)),
-    h("td", { class: "hide-md" }, healthEl(p)),
-    h("td", { class: "num r" + (up ? "" : " dim") }, h("div", { class: "cell-cpu" }, up && h("span", { class: "hide-md" }, miniSpark(hst ? hst.cpu : [])), h("span", { text: up ? p.cpu.toFixed(1) + "%" : "–" }))),
-    h("td", { class: "num r hide-sm" + (up ? "" : " dim"), text: up ? fmtBytes(p.memory) : "–" }),
+    h("td", { class: "col-health hide-md" }, healthEl(p)),
+    h("td", { class: "num r" + (up ? "" : " dim") }, meterEl(up ? p.cpu.toFixed(1) + "%" : "–", up ? p.cpu / 100 : null)),
+    h("td", { class: "num r hide-sm" + (up ? "" : " dim") }, meterEl(up ? fmtBytes(p.memory) : "–", up && p.max_memory ? p.memory / p.max_memory : null)),
     h("td", { class: "num r hide-sm" + (up ? "" : " dim"), text: up ? fmtUptime(p.uptime_ms) : "–" }),
     h("td", { class: "num r hide-sm" + (p.restarts ? " warn" : " dim"), text: p.restarts }),
     h("td", {}, h("div", { class: "cell-actions" },
@@ -1200,7 +1264,7 @@ PAGES.process = () => {
         refs.tabs.append(h("a", { class: "tab", role: "tab", href: id === "overview" ? base() : `${base()}/${id}`, "data-tab": id }, icon(ic), label, id === "events" && h("span", { class: "tab-count" })));
       }
       refs.page.append(
-        h("div", { class: "crumbs" }, h("a", { href: `#/s/${encodeURIComponent(srv())}/processes`, text: "Processes" }), icon("chevronRight"), h("span", { class: "mono", text: name() })),
+        h("div", { class: "crumbs" }, h("a", { href: `#/s/${encodeURIComponent(srv())}/processes`, text: "Processes" }), icon("chevronRight"), h("span", { text: name() })),
         h("div", { class: "page-head" }, h("div", { class: "page-title" }, refs.title, refs.sub), refs.actions),
         refs.missing, refs.callout, refs.tabs, refs.body);
       root.append(refs.page);
@@ -1223,7 +1287,7 @@ PAGES.process = () => {
       refs.missing.hidden = !!p || !loaded;
       refs.tabs.hidden = refs.body.hidden = !p;
       if (!p) {
-        fill(refs.title, h("span", { class: "mono", text: name() }));
+        fill(refs.title, h("span", { text: name() }));
         refs.sub.textContent = loaded ? "" : "Loading…";
         fill(refs.actions, );
         fill(refs.callout, );
@@ -1231,9 +1295,8 @@ PAGES.process = () => {
         return;
       }
       const busy = S.busy.has(key(srv(), p.name));
-      fill(refs.title, h("span", { class: "mono", text: p.name }), statusEl(srv(), p), p.health_check && p.health && h("span", { class: "badge " + ({ healthy: "good", unhealthy: "bad", starting: "warn" }[p.health] || "") }, icon("pulse"), p.health));
-      fill(refs.sub, `id ${p.id}`, p.pid ? ` · pid ${p.pid}` : ` · last exit ${p.exit_code}`, ` · on ${serverLabel(srv())}`);
-      refs.sub.classList.add("mono");
+      fill(refs.title, h("span", { text: p.name }), statusEl(srv(), p), p.health_check && p.health && h("span", { class: "badge " + ({ healthy: "good", unhealthy: "bad", starting: "warn" }[p.health] || "") }, icon("pulse"), p.health));
+      fill(refs.sub, h("span", { class: "mono", text: `id ${p.id}${p.pid ? ` · pid ${p.pid}` : ` · last exit ${p.exit_code}`}` }), `· on ${serverLabel(srv())}`);
       fill(refs.actions, 
         h("button", { class: "btn", disabled: busy || !canRestart(p), title: canRestart(p) ? null : "Not supervised: stop it first", onclick: () => act(srv(), name(), "restart") }, icon("restart"), "Restart", h("kbd", { text: "r" })),
         p.reload_signal && p.status === "online" && h("button", { class: "btn", disabled: busy, title: `Sends ${p.reload_signal}; the process keeps running`, onclick: () => act(srv(), name(), "reload") }, icon("pulse"), "Reload"),
@@ -1275,23 +1338,27 @@ TAB_PAGES.overview = (srv, name) => {
   let refs;
   return {
     mount(root) {
-      refs = { cpu: kpi("CPU", "cpu"), mem: kpi("Memory", "memory"), up: kpi("Uptime", "clock"), rs: kpi("Restarts", "restart"), facts: h("dl", { class: "facts" }), events: h("div") };
+      refs = { cpu: chartCard("CPU"), mem: chartCard("Memory"), up: stat("Uptime"), rs: stat("Restarts"), health: stat("Health"), facts: h("dl", { class: "facts" }), events: h("div") };
       root.append(
-        h("div", { class: "card kpis k4" }, refs.cpu, refs.mem, refs.up, refs.rs),
-        h("div", { class: "grid-2 section" },
+        h("dl", { class: "stats under" }, refs.up, refs.rs, refs.health),
+        refs.charts = h("div", { class: "charts" }, refs.cpu, refs.mem),
+        h("div", { class: "cols section" },
           h("div", {}, sectionHead("Details"), h("div", { class: "card" }, refs.facts)),
           h("div", {}, sectionHead("Recent events", null, h("a", { class: "more", href: `#/s/${encodeURIComponent(srv())}/p/${encodeURIComponent(name())}/events` }, "All events", icon("chevronRight"))), refs.events)));
     },
     update(p) {
       const hst = S.hist.get(key(srv(), p.name));
       setKpi(refs.cpu, p.pid ? p.cpu.toFixed(1) + "%" : "–", p.pid ? "of one core" : "not running");
-      setKpi(refs.mem, p.pid ? fmtBytes(p.memory) : "–", p.pid ? "resident" : "not running");
+      setKpi(refs.mem, p.pid ? fmtBytes(p.memory) : "–", p.pid ? (p.max_memory ? `of ${fmtBytes(p.max_memory)} allowed` : "resident") : "not running",
+        p.pid && p.max_memory && p.memory / p.max_memory >= 0.9 ? "bad" : p.pid && p.max_memory && p.memory / p.max_memory >= 0.7 ? "warn" : "");
+      refs.charts.hidden = !p.pid && !(hst && hst.cpu.length > 1); // nothing to draw for a process that never ran
       drawChart(refs.cpu, p.pid && hst ? hst.cpu : [], { fromZero: true, minSpan: 10, label: (v) => v.toFixed(0) + "%" });
       drawChart(refs.mem, p.pid && hst ? hst.mem : [], { fromZero: false, minSpan: 8 << 20, label: fmtBytes });
-      setKpi(refs.up, p.pid ? fmtUptime(p.uptime_ms) : "–", p.pid ? "since " + clock(new Date(Date.now() - p.uptime_ms)) : p.status === "errored" ? "gave up restarting" : "not running");
-      setKpi(refs.rs, String(p.restarts),
+      setStat(refs.up, p.pid ? fmtUptime(p.uptime_ms) : "–", p.pid ? "since " + clock(new Date(Date.now() - p.uptime_ms)) : p.status === "errored" ? "gave up restarting" : "not running");
+      setStat(refs.rs, String(p.restarts),
         p.restarts === 0 ? "no crashes" : p.pid ? "running again" : p.status === "waiting" ? "backing off" : "",
         p.restarts ? "warn" : "");
+      setStat(refs.health, p.health_check ? (p.health || "not running") : "none set", p.health_check ? "" : "", p.health === "healthy" ? "good" : p.health === "unhealthy" ? "bad" : "");
 
       const facts = h("dl");
       const add = (k, v, cls) => facts.append(h("dt", { text: k }), v instanceof Node ? h("dd", { class: cls || "" }, v) : h("dd", { class: cls || "", text: v, title: v }));
@@ -1305,7 +1372,7 @@ TAB_PAGES.overview = (srv, name) => {
       add("Logs", p.out_log || "–");
       fill(refs.facts, ...facts.childNodes);
 
-      fill(refs.events, eventsCard((p.events || []).slice(0, 5)));
+      fill(refs.events, eventsCard((p.events || []).slice(0, 6)));
     },
   };
 };
@@ -1315,7 +1382,7 @@ function eventsCard(evs) {
   return h("div", { class: "card timeline" }, evs.map((e) => {
     const inf = eventInfo(e);
     return h("div", { class: "tl-item" },
-      h("span", { class: "ev-icon " + inf.tone }, icon(inf.ic)),
+      h("span", { class: "tl-dot " + inf.tone }),
       h("div", { class: "tl-main" },
         h("div", { class: "tl-title" }, inf.title(e), e.exit_code ? h("span", { class: "badge", text: "exit " + e.exit_code }) : null, e.kind === "started" && e.detail ? h("span", { class: "badge", text: e.detail }) : null),
         e.detail && e.kind !== "started" && h("pre", { class: "tl-detail", text: e.detail })),
@@ -1341,13 +1408,14 @@ TAB_PAGES.config = () => {
         for (const [k, v] of rows) dl.append(h("dt", { text: k }), v instanceof Node ? h("dd", {}, v) : h("dd", { text: v, title: v }));
         return h("div", { class: "card" }, h("div", { class: "card-title" }, icon(ic), h("h2", { text: title })), dl);
       };
-      fill(box, 
-        card("terminal", "Run", [
+      fill(box,
+        h("div", { class: "stack" },
+          card("terminal", "Run", [
           ["Command", p.command], ["Directory", p.cwd], ["procly id", String(p.id)],
           ["Environment", p.env_keys.length ? h("div", { class: "chips" }, p.env_keys.map((k) => h("span", { class: "badge", text: k }))) : h("span", { class: "muted", text: "none set" })],
           ["", h("span", { class: "muted", text: "Values are never sent to the panel, only names." })],
         ]),
-        card("restart", "Restart policy", [
+          card("restart", "Restart policy", [
           ["Autorestart", p.autorestart ? "on" : "off"],
           ["Gives up after", `${p.max_restarts} crashes in a row`],
           ["Retry delay", `${fmtDur(p.restart_delay_ms)}, doubling up to 30s`],
@@ -1355,18 +1423,18 @@ TAB_PAGES.config = () => {
           ["Stop", `${p.stop_signal || "SIGTERM"}, then SIGKILL after ${fmtDur(p.kill_timeout_ms)}`],
           ["Scheduled", p.restart_every || p.restart_at ? [p.restart_every && `every ${p.restart_every}`, p.restart_at && `daily at ${p.restart_at}`].filter(Boolean).join(", ") : "none"],
           ["Reload", p.reload_signal ? `${p.reload_signal} (procly reload ${p.name})` : "not set: restart is the only way"],
-        ]),
-        card("config", "Logs", [
+        ])),
+        h("div", { class: "stack" },
+          card("config", "Logs", [
           ["stdout", p.out_log || "–"], ["stderr", p.err_log || "–"],
           ["Rotation", p.log_max_bytes ? `at ${fmtBytes(p.log_max_bytes)}, keeps ${plural(p.log_keep, "old file")}` : "off"],
         ]),
-        card("pulse", "Health check", p.health_check ? [
+          card("pulse", "Health check", p.health_check ? [
           ["Target", p.health_check], ["Every", fmtDur(p.health_every_ms)],
           ["Restarts after", plural(p.health_retries, "failed check")],
           ["Now", p.health || "not running"], p.health_error ? ["Last error", p.health_error] : null,
         ].filter(Boolean) : [["", h("span", { class: "muted", text: "None. Add one with --health http://127.0.0.1:3000/health or a tcp:// address." })]]),
-        h("div", { class: "card card-pad" }, h("div", { class: "muted", text: "Change these by starting the process again with new flags or a procly.yml. Same details in a terminal:" }), cmdline(`procly describe ${p.name}`)),
-      );
+          h("div", { class: "card card-pad" }, h("div", { class: "muted", text: "Change these by starting the process again with new flags or a procly.yml. Same details in a terminal:" }), cmdline(`procly describe ${p.name}`))));
     },
   };
 };
@@ -1528,22 +1596,7 @@ PAGES.servers = () => {
     update() {
       const ok = okServers().length;
       refs.sub.textContent = `${plural(S.servers.length, "server")}, ${ok} reachable`;
-      fill(refs.body, ...S.servers.map((s) => {
-        const sys = (S.system.get(s.name) || {}).data;
-        const c = s.ok ? (S.procs.has(s.name) ? countStatus(procsOf(s.name)) : s.by_status) : {};
-        const href = `#/servers/${encodeURIComponent(s.name)}`;
-        const m = sys ? systemMeters(sys, true) : [];
-        return h("tr", { class: "click", "data-key": "s:" + s.name, onclick: () => go(href) },
-          h("td", {}, h("div", { class: "cell-name" }, h("b", { text: s.label }), h("span", { text: s.local ? "this server" : s.url === "tunnel" ? "tunnel through the hub" : s.url }))),
-          h("td", {}, h("span", { class: "status " + (s.ok ? "online" : "down"), text: s.ok ? "connected" : "unreachable", title: s.error || "" })),
-          h("td", { class: "hide-md" }, sys ? h("div", { class: "cell-name" }, h("b", { text: sys.distro || sys.os }), h("span", { text: `${sys.arch} · ${plural(sys.cpus, "core")} · procly ${shortVersion(sys.version)}` })) : h("span", { class: "dim", text: "–" })),
-          h("td", { class: "hide-sm" }, m[0] || "–"), h("td", { class: "hide-sm" }, m[1] || "–"), h("td", { class: "hide-lg" }, m[2] || "–"),
-          h("td", { class: "num r hide-md" + (sys ? "" : " dim"), text: sys ? fmtUptime(sys.uptime_s * 1000) : "–" }),
-          h("td", {}, h("div", { class: "sc-foot", style: null }, healthBar(c), h("span", { class: "num", text: s.ok ? s.total : "–" }))),
-          h("td", { class: "r" }, h("span", { class: "dim" }, icon("chevronRight"))));
-      }));
-      for (const td of refs.body.querySelectorAll("td .meter")) td.parentElement.style.minWidth = "96px";
-      for (const f of refs.body.querySelectorAll(".sc-foot")) { f.style.padding = "0"; f.style.border = "0"; f.style.minWidth = "120px"; }
+      fill(refs.body, ...S.servers.map((s) => serverRow(s, true)));
     },
   };
 };
@@ -1557,15 +1610,15 @@ PAGES.server = () => {
     mount(root) {
       refs = {
         title: h("h1"), sub: h("p"), actions: h("div", { class: "page-actions" }),
-        load: kpi("Load", "cpu"), mem: kpi("Memory", "memory"), disk: kpi("Disk", "disk"), up: kpi("Host uptime", "clock"), procs: kpi("Processes", "processes"),
+        load: stat("Load"), mem: stat("Memory"), disk: stat("Disk"), up: stat("Host uptime"), procs: stat("Processes"),
         facts: h("dl", { class: "facts" }), top: h("div"), note: h("div"),
       };
       root.append(h("div", { class: "page" },
         h("div", { class: "crumbs" }, h("a", { href: "#/servers", text: "Servers" }), icon("chevronRight"), h("span", { text: serverLabel(srv()) })),
         h("div", { class: "page-head" }, h("div", { class: "page-title" }, refs.title, refs.sub), refs.actions),
         refs.note,
-        h("div", { class: "card kpis" }, refs.load, refs.mem, refs.disk, refs.up, refs.procs),
-        h("div", { class: "grid-2 section" },
+        h("dl", { class: "stats under" }, refs.load, refs.mem, refs.disk, refs.up, refs.procs),
+        h("div", { class: "cols" },
           h("div", {}, sectionHead("Busiest processes", null, h("a", { class: "more", href: `#/s/${encodeURIComponent(srv())}/processes` }, "All processes", icon("chevronRight"))), refs.top),
           h("div", {}, sectionHead("System"), h("div", { class: "card" }, refs.facts)))));
     },
@@ -1586,20 +1639,20 @@ PAGES.server = () => {
 
       if (sys) {
         const cores = sys.cpus || 1;
-        setKpi(refs.load, sys.load[0].toFixed(2), `5m ${sys.load[1].toFixed(2)} · 15m ${sys.load[2].toFixed(2)} · ${plural(cores, "core")}`, sys.load[0] > cores ? "warn" : "");
+        setStat(refs.load, sys.load[0].toFixed(2), `5m ${sys.load[1].toFixed(2)} · 15m ${sys.load[2].toFixed(2)}`, sys.load[0] > cores ? "warn" : "");
         if (sys.mem_available) {
           const used = sys.mem_total - sys.mem_available;
-          setKpi(refs.mem, Math.round((used / sys.mem_total) * 100) + "%", `${fmtBytes(used)} of ${fmtBytes(sys.mem_total)}`, used / sys.mem_total > 0.9 ? "bad" : "");
-        } else setKpi(refs.mem, fmtBytes(sys.mem_total), "total");
+          setStat(refs.mem, Math.round((used / sys.mem_total) * 100) + "%", `${fmtBytes(used)} of ${fmtBytes(sys.mem_total)}`, used / sys.mem_total > 0.9 ? "bad" : "");
+        } else setStat(refs.mem, fmtBytes(sys.mem_total), "total");
         const du = sys.disk_total - sys.disk_free;
-        setKpi(refs.disk, sys.disk_total ? Math.round((du / sys.disk_total) * 100) + "%" : "–", sys.disk_total ? `${fmtBytes(sys.disk_free)} free of ${fmtBytes(sys.disk_total)}` : "", sys.disk_total && du / sys.disk_total > 0.9 ? "bad" : "");
-        setKpi(refs.up, fmtUptime(sys.uptime_s * 1000), "since " + new Date(Date.now() - sys.uptime_s * 1000).toLocaleDateString());
+        setStat(refs.disk, sys.disk_total ? Math.round((du / sys.disk_total) * 100) + "%" : "–", sys.disk_total ? `${fmtBytes(sys.disk_free)} free` : "", sys.disk_total && du / sys.disk_total > 0.9 ? "bad" : "");
+        setStat(refs.up, fmtUptime(sys.uptime_s * 1000), "since " + new Date(Date.now() - sys.uptime_s * 1000).toLocaleDateString());
       } else {
-        for (const k of [refs.load, refs.mem, refs.disk, refs.up]) setKpi(k, "–", sysE.error ? "not available" : "loading…");
+        for (const k of [refs.load, refs.mem, refs.disk, refs.up]) setStat(k, "–", sysE.error ? "not available" : "");
       }
       const list = procsOf(srv());
       const c = countStatus(list);
-      setKpi(refs.procs, h("span", {}, String(c.online), h("small", { text: "/ " + list.length })), list.filter(needsAttention).length ? plural(list.filter(needsAttention).length, "needs", "need") + " attention" : "online", list.filter(needsAttention).length ? "warn" : "");
+      setStat(refs.procs, `${c.online} of ${list.length}`, list.filter(needsAttention).length ? plural(list.filter(needsAttention).length, "needs", "need") + " attention" : "running", list.filter(needsAttention).length ? "warn" : "");
 
       const facts = h("dl");
       const add = (k, v) => facts.append(h("dt", { text: k }), h("dd", { text: v || "–", title: v || "" }));
@@ -1612,7 +1665,7 @@ PAGES.server = () => {
 
       const top = [...list].filter((p) => p.pid).sort((a, b) => b.cpu - a.cpu || b.memory - a.memory).slice(0, 6);
       fill(refs.top, top.length ? h("div", { class: "card list" }, top.map((p) => h("a", { class: "list-item", href: `#/s/${encodeURIComponent(srv())}/p/${encodeURIComponent(p.name)}` },
-        h("div", { class: "grow" }, h("div", { class: "title" }, h("b", { text: p.name })), h("div", { class: "sub mono", text: p.command })),
+        h("div", { class: "grow inline" }, h("b", { text: p.name }), h("span", { class: "mono", text: p.command })),
         h("span", { class: "num muted", text: fmtBytes(p.memory) }),
         h("span", { class: "num", text: p.cpu.toFixed(1) + "%" })))) : h("div", { class: "card" }, emptyBox("processes", "Nothing running", "Running processes are listed here by CPU.")));
     },
@@ -1631,20 +1684,22 @@ PAGES.settings = () => {
       root.append(h("div", { class: "page" },
         pageHead({ title: "Settings", sub: "This panel and how procly reaches you." }),
         h("div", { class: "settings" },
+          h("div", { class: "stack" },
           h("div", { class: "card" },
             h("div", { class: "card-title" }, icon("monitor"), h("h2", { text: "Appearance" })),
             h("div", { class: "set-row" }, h("div", { class: "grow" }, h("b", { text: "Theme" }), h("p", { text: "System follows your computer. Saved in this browser." })), refs.theme)),
-          h("div", { class: "card" },
-            h("div", { class: "card-title" }, icon("key"), h("h2", { text: "Panel" }), h("button", { class: "btn small right", onclick: logout }, icon("logout"), "Sign out")),
-            refs.panel,
-            h("div", { class: "set-row" }, h("div", { class: "grow" }, h("b", { text: "Forgot the password?" }), h("p", { text: "Stop the running panel, then start it again with this flag. It prints a new password and signs every session out." })), cmdline("procly web --reset-password"))),
           h("div", { class: "card" },
             h("div", { class: "card-title" }, icon("bell"), h("h2", { text: "Alerts" })),
             h("div", { class: "set-row" }, h("div", { class: "grow" }, h("b", { text: "Crash and health alerts" }), h("p", { text: "procly messages you when a process crashes, gives up or fails its health check. At most one message per process every 5 minutes." }))),
             h("ol", { class: "steps" },
               h("li", {}, h("span", { text: "Telegram: create a bot with @BotFather, then:" }), cmdline("procly alerts telegram --token <bot token> --chat <chat id>")),
               h("li", {}, h("span", { text: "Slack: make an incoming webhook, then:" }), cmdline("procly alerts slack --webhook <https://hooks.slack.com/…>")),
-              h("li", {}, h("span", { text: "Check what is set up:" }), cmdline("procly alerts")))),
+              h("li", {}, h("span", { text: "Check what is set up:" }), cmdline("procly alerts"))))),
+          h("div", { class: "stack" },
+          h("div", { class: "card" },
+            h("div", { class: "card-title" }, icon("key"), h("h2", { text: "Panel" }), h("button", { class: "btn small right", onclick: logout }, icon("logout"), "Sign out")),
+            refs.panel,
+            h("div", { class: "set-row" }, h("div", { class: "grow" }, h("b", { text: "Forgot the password?" }), h("p", { text: "Stop the running panel, then start it again with this flag. It prints a new password and signs every session out." })), cmdline("procly web --reset-password"))),
           h("div", { class: "card", id: "keys" },
             h("div", { class: "card-title" }, icon("keyboard"), h("h2", { text: "Keyboard shortcuts" })),
             h("div", { class: "keys-grid" },
@@ -1652,7 +1707,7 @@ PAGES.settings = () => {
               keyRow("Servers", "g", "s"), keyRow("Settings", "g", ","),
               keyRow("Next / previous server", "[", "]"), keyRow("Filter or search", "/"),
               keyRow("New process", "n"), keyRow("Restart (on a process)", "r"),
-              keyRow("Stop or start", "s"), keyRow("Logs / events / config", "l", "e", "c"))))));
+              keyRow("Stop or start", "s"), keyRow("Logs / events / config", "l", "e", "c")))))));
     },
     update() {
       const cur = load("procly.theme") || "system";
