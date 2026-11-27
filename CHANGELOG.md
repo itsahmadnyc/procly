@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.4.4
+
+`procly ls` in a terminal.
+
+- A framed table with the version, the process count and the counts by status in the top edge. CPU and memory have bars: memory is measured against `max_memory` when the process has one (yellow from 70%, red from 90%), and against the biggest process otherwise. A group of instances is a tree (`▾ api ×3`, `├ api-1`, `└ api-3`) with the sums on its first line, restarts in yellow, and health as `✓ healthy` or `✗ unhealthy`.
+- Under the table, what needs a look and what to run: `✗ billing gave up after 15 restarts (exit code 1)  procly logs billing`, an app failing its health check, and processes left over from a dead daemon.
+- It fits the terminal: columns go in order of how little they matter (pid, memory bar, CPU bar, uptime, health, id, restarts), a long name is cut with `…` before cpu and memory go, and a line never wraps.
+- Nothing changes for scripts: piped or redirected output, `NO_COLOR` and `--json` are exactly as before. The new table is only drawn on a terminal.
+
 ## v0.4.3
 
 `procly monit`: scrolling up in the logs no longer breaks the screen.
