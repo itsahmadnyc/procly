@@ -305,6 +305,11 @@ works too (click a row, scroll the logs).
 Colors follow your terminal theme. If it guesses light/dark wrong, set
 `PROCLY_THEME=light` or `PROCLY_THEME=dark`.
 
+Scrolling the logs redraws most of the screen (about 7 KB a frame), so `monit` sends at most
+30 frames a second, and 8 over SSH (found from `SSH_CONNECTION`), where more than that makes
+the screen lag behind your scrolling. `PROCLY_FPS=1..60` sets it. A key held down or a trackpad
+flick speeds up the longer it goes on, so it reaches its place in fewer frames.
+
 ## Several servers
 
 One panel can manage many machines. On every extra server, run the agent:

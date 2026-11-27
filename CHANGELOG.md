@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.4.5
+
+`procly monit`: scrolling the logs no longer lags, most of all over SSH.
+
+- **Cause**: scrolling the logs moves every line, so every frame redraws about 33 rows, 7 KB. At the old 60 frames a second that is up to 400 KB/s, more than a link with some latency takes in at once, so the screen kept moving for seconds after you stopped. Measured by the bytes `monit` sends for one gesture: a trackpad flick (40 wheel events) 161 KB, a key held for a second 195 KB.
+- `monit` now sends at most 30 frames a second, and 8 when it runs over SSH (`SSH_CONNECTION` or `SSH_TTY` is set). `PROCLY_FPS=1..60` overrides. The same gestures now send 22 KB and 62 KB.
+- Scrolling speeds up the longer it goes on: one step stays one step (a line with the keys, three with the wheel), but steps in a row, less than 150 ms apart, grow up to eight times. A held key or a flick reaches its place in fewer frames, and still stops exactly at the oldest line.
+
 ## v0.4.4
 
 `procly ls` in a terminal.
