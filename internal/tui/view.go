@@ -161,8 +161,19 @@ func (m model) footerLine() string {
 				what = fmt.Sprintf("all %d instances of %s", len(r.members), m.confirm)
 			}
 		}
-		return " " + sRed.Render("delete "+what+"? it will be stopped and forgotten") +
-			"   " + sKey.Render("y") + sMuted.Render(" delete   any other key cancels")
+		ask := map[string]string{
+			"restart": "restart " + what + "? requests in flight may fail for a moment",
+			"stop":    "stop " + what + "? it stays down until you start it",
+			"delete":  "delete " + what + "? it will be stopped and forgotten",
+			"cluster": "run " + what + " in cluster mode? it restarts, one worker per CPU",
+			"fork":    "run " + what + " in fork mode? it restarts",
+		}[m.confirmVerb]
+		style := sRed
+		if m.confirmVerb != "delete" {
+			style = sAccent
+		}
+		return " " + style.Render(ask) +
+			"   " + sKey.Render("y") + sMuted.Render(" yes   any other key cancels")
 	}
 	if m.input != inputNone {
 		label := "filter processes"
@@ -180,7 +191,7 @@ func (m model) footerLine() string {
 	case m.focus == paneLogs:
 		hints = []hint{{"↑↓", "scroll"}, {"f", "follow"}, {"/", "search"}, {"e", "stream"}, {"w", "wrap"}, {"c", "clear"}, {"tab", "processes"}, {"enter", "full screen"}}
 	default:
-		hints = []hint{{"↑↓", "select"}, {"r", "restart"}, {"s", "stop/start"}, {"R", "reload"}, {"d", "delete"}, {"/", "filter"}, {"o", "sort"}, {"tab", "logs"}, {"enter", "full screen"}}
+		hints = []hint{{"↑↓", "select"}, {"r", "restart"}, {"s", "stop/start"}, {"R", "reload"}, {"m", "mode"}, {"d", "delete"}, {"/", "filter"}, {"o", "sort"}, {"tab", "logs"}, {"enter", "full screen"}}
 	}
 
 	var right string
@@ -888,6 +899,7 @@ func (m model) helpView() string {
 			{"r", "restart (a group restarts one instance at a time)"},
 			{"R", "reload: send reload_signal, the process keeps running"},
 			{"s", "stop, or start when stopped"},
+			{"m", "switch fork / cluster, asks first"},
 			{"d  x", "delete, asks first"},
 		}},
 		{"Logs", [][2]string{

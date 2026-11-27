@@ -111,11 +111,22 @@ func TestDeleteNeedsConfirmation(t *testing.T) {
 
 func TestActionsAndResults(t *testing.T) {
 	m := loaded(t)
-	m, cmd := send(m, key("r"))
-	if cmd == nil || m.busy["api"] != "restart" {
-		t.Fatalf("r: busy=%v", m.busy)
+	m, none := send(m, key("r"))
+	if none != nil || len(m.busy) != 0 || m.confirmVerb != "restart" {
+		t.Fatalf("r should only ask: busy=%v", m.busy)
 	}
-	if _, again := send(m, key("r")); again != nil {
+	m, cmd := send(m, key("n")) // anything but y cancels
+	if cmd != nil || len(m.busy) != 0 || m.confirm != "" {
+		t.Fatal("n should cancel")
+	}
+	m, _ = send(m, key("r"))
+	m, cmd = send(m, key("y"))
+	if cmd == nil || m.busy["api"] != "restart" {
+		t.Fatalf("r then y: busy=%v", m.busy)
+	}
+	m, _ = send(m, key("r"))
+	m, again := send(m, key("y"))
+	if again != nil {
 		t.Fatal("a second action while one is running should be ignored")
 	}
 	m, _ = send(m, actionMsg{verb: "restart", name: "api"})
@@ -128,7 +139,7 @@ func TestActionsAndResults(t *testing.T) {
 	}
 
 	// s stops a running process and starts a stopped one.
-	m, _ = send(m, key("s"))
+	m, _ = send(m, key("s"), key("y"))
 	if m.busy["api"] != "stop" {
 		t.Fatalf("s on online: %v", m.busy)
 	}
@@ -290,5 +301,20 @@ func TestViewStates(t *testing.T) {
 		if !strings.Contains(view, want) {
 			t.Errorf("view is missing %q", want)
 		}
+	}
+}
+
+func TestModeAsksBeforeSwitching(t *testing.T) {
+	m := loaded(t)
+	m, cmd := send(m, key("m"))
+	if cmd != nil || m.confirm == "" || (m.confirmVerb != "cluster" && m.confirmVerb != "fork") {
+		t.Fatalf("m should ask: %q %q", m.confirm, m.confirmVerb)
+	}
+	if !strings.Contains(m.View(), "mode?") {
+		t.Fatal("the footer should say what will happen")
+	}
+	m, cmd = send(m, key("x"))
+	if cmd != nil || len(m.busy) != 0 {
+		t.Fatal("any other key cancels")
 	}
 }

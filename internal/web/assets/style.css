@@ -857,7 +857,7 @@ a.act-item:hover { background: var(--hover); }
 .empty-art .ea-acc { fill: var(--green-mark); opacity: .85; }
 .empty-art .ea-dot { fill: var(--faint); animation: blink 2.4s ease-in-out infinite; }
 .skel-card { height: 92px; border-radius: 12px; background: var(--raised); animation: pulse 1.4s ease-in-out infinite; }
-.skel-line { height: 12px; border-radius: 99px; background: var(--raised); animation: pulse 1.4s ease-in-out infinite; margin-bottom: 12px; }
+.skel-line { width: 40%; height: 12px; border-radius: 99px; background: var(--raised); animation: pulse 1.4s ease-in-out infinite; margin-bottom: 12px; }
 .list-item, .act-item, .table tbody tr { transition: background-color .12s; }
 @media (prefers-reduced-motion: reduce) { .page, .empty-art .ea-dot, .skel-card, .skel-line { animation: none; } .theme-tile { transition: none; } }
 .mode-fact { display: inline-flex; align-items: center; gap: 10px; }

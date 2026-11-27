@@ -2130,6 +2130,8 @@ async function startApp() {
   $("login").hidden = true;
   $("app").hidden = false;
   buildChrome();
+  $("view").replaceChildren(h("div", { class: "page", "aria-busy": "true" },
+    h("div", { class: "skel-line" }), h("div", { class: "kpi-row" }, ...[0, 1, 2, 3].map(() => h("div", { class: "skel-card" }))), h("div", { class: "skel-card" })));
   await Promise.allSettled([loadServers(), loadProcs(S.server)]);
   if (!S.procs.has(S.server)) await loadProcs(S.server);
   route();

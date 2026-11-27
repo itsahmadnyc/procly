@@ -7,6 +7,10 @@ Cluster mode, a password you can change, and a fuller server page.
 - **Cluster mode**: `exec_mode: cluster` (or `procly start app.js --exec-mode cluster -i 4`) runs a Node app as a master plus workers that share its ports (`node:cluster`, connections handed round-robin). `instances` is the worker count, 0 means one per CPU. procly supervises the master; CPU and memory are summed over the whole group; `procly reload` is a rolling reload (one worker at a time, no dropped connections).
 - **`procly mode <name> fork|cluster [-i n]`**: switch a running app between the two. It asks first, restarts the app, refuses without touching it when the app cannot run in that mode, and leaves a stopped app stopped. The panel gets the same through `POST /api/servers/<server>/processes/<name>/mode` (this server only).
 - **Password change**: `POST /api/password` in the panel (current password required).
+- **A livelier panel**: a greeting, KPI cards with status chips and a CPU/memory chart with a hover tooltip on the overview; a split-card sign-in page with its own illustration; skeletons while loading and pictures in empty states; gentle motion that stops for `prefers-reduced-motion`.
+- **Log terminal themes** in Settings (Procly, Dracula, One Dark, Nord, Monokai, Tokyo Night, Gruvbox, Tomorrow Night, Solarized Dark and Light, GitHub Light), text size, and long lines wrap by default.
+- **Change the password** and **switch fork/cluster** from the panel. Restart, stop, delete, mode switch, password change and save list all ask first, in the panel and in `procly monit` (press `m` there to switch mode).
+- **Server page** shows CPU model, memory, swap, disk, uptime, Node version, the user procly runs as, time zone and every address.
 - **Server info**: CPU model, swap, addresses, Node version, user and timezone are reported by `sysinfo`.
 
 ## v0.4.7

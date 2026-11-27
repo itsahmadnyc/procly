@@ -44,3 +44,14 @@ Defined at the top of `style.css`. Light uses Paper (`#f7f7f6`) as the page and 
 ## Checking a change
 
 Look at every page at 1440, 1920 and 390 px wide, in light and dark, with an empty list, one process, a group, a crashing process and a server that is down. Tab through the page: every control shows a focus ring. `internal/web/href_guard_test.go` keeps every link inside the panel.
+
+## Update for v0.5.0: a livelier dashboard
+
+The first redesign was deliberately plain. Feedback was that the panel should feel like a dashboard people enjoy, so v0.5.0 relaxes decisions 1, 8 and 9 and leaves the rest:
+
+- **The overview** opens with a greeting and the one-sentence answer, then four KPI cards (processes, CPU, memory, restarts). Each carries a status chip with a word, so state is never color alone. Below sits a resource chart (CPU or memory of everything, last two minutes) with a rule and tooltip that follow the pointer. The "identical big-number cards" tell is accepted here because every card is also a state indicator, and the table and attention list remain the main content.
+- **Sign-in** is a split card: an illustration of our own (solid fills in our ink and green, no gradients) beside a large form.
+- **Motion** is allowed where it explains: pages and cards rise in, LEDs in the illustrations blink, skeleton blocks pulse, empty states have a small picture. All of it stops under `prefers-reduced-motion`.
+- **Every state** has a skeleton (first load) and an empty state with a picture and a sentence.
+- **Settings** gains a log terminal section (ten color themes in the style of Termius/iTerm, text size, wrap, a live preview), password change and mode switching. Long lines wrap by default.
+- **Every change asks first**: restart, stop, delete, mode switch, password change, saving the list. The TUI asks in its footer (`y` confirms, anything else cancels).
