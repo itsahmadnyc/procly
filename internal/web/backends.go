@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/itsahmadnyc/procly/internal/client"
+	"github.com/itsahmadnyc/procly/internal/domains"
 	"github.com/itsahmadnyc/procly/internal/logtail"
 	"github.com/itsahmadnyc/procly/internal/proc"
 	"github.com/itsahmadnyc/procly/internal/remote"
@@ -19,6 +20,7 @@ type backend interface {
 	Save(ctx context.Context) (int, error)
 	Logs(ctx context.Context, name string, send func([]logtail.Event) bool) error
 	System(ctx context.Context) (sysinfo.System, error)
+	Domains(ctx context.Context, refresh bool) (domains.Report, error)
 }
 
 // starter is a backend that can start new commands. Only the local one is:
@@ -59,6 +61,14 @@ func (l localBackend) Action(_ context.Context, name, verb string) error {
 
 // System reads this machine directly: the panel runs where the daemon runs.
 func (l localBackend) System(context.Context) (sysinfo.System, error) { return sysinfo.Read(), nil }
+
+func (l localBackend) Domains(_ context.Context, refresh bool) (domains.Report, error) {
+	rep, err := l.c.Domains(refresh)
+	if err != nil {
+		return rep, errDaemonDown
+	}
+	return rep, nil
+}
 
 func (l localBackend) Save(context.Context) (int, error) {
 	n, _, err := l.c.Save()

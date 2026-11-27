@@ -183,6 +183,7 @@ func newHandler(m *proc.Manager, shutdown, detach func()) http.Handler {
 		infos, err := m.Delete(r.PathValue("name"))
 		respond(w, infos, err)
 	})
+	mux.HandleFunc("GET /v1/domains", (&domainsCache{}).handler(m))
 	mux.HandleFunc("POST /v1/save", func(w http.ResponseWriter, r *http.Request) {
 		n, err := m.Save(paths.DumpFile())
 		respond(w, map[string]any{"saved": n, "path": paths.DumpFile()}, err)

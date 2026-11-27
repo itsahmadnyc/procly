@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.4.7
+
+Which domain reaches an app.
+
+- **`procly domains`**: for each running process, the TCP ports it listens on and the domain names that nginx, Caddy or Apache send to them: the name, the path (`/api`), `https` or `http`, which proxy and file, and where the name points in DNS (this server, Cloudflare, another address, or nowhere). `--json`, `--refresh` (look again), and `--server <name>` for a connected server. It reads `/etc/nginx/nginx.conf` and its includes (with a parser for nginx's syntax: `upstream` blocks, `include` globs and symlinked `sites-enabled`, quoted and wildcard names, comments), the Caddyfile (site blocks, `reverse_proxy`, `handle`, `import`) and Apache virtual hosts (`ProxyPass`, `ProxyPassMatch`, `<Location>`). It changes nothing. Tried on a real server with 89 nginx sites.
+- **The panel**: a Domain column in the process table (shown when something has a domain), a Domain figure on a process's page, and a Domain row in its details with every name, how it is served, where it points, why none were found, and a Scan again button.
+- **`procly monit`**: a domain column in the table and a domain line in the details ("none found, listens on :3000; no nginx, Caddy or Apache site sends traffic there"). `procly describe` has the same row.
+- Ports of a process are found from `/proc` on Linux and with `lsof` on macOS. New: `GET /v1/domains` on the daemon and agent, `/api/servers/<name>/domains` in the panel. A server on an older version says it needs 0.4.7.
+
 ## v0.4.6
 
 A redesigned web panel.

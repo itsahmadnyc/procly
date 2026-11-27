@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/itsahmadnyc/procly/internal/domains"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
@@ -63,6 +64,10 @@ func (f *fakeBackend) Logs(ctx context.Context, name string, send func([]logtail
 	}
 	send([]logtail.Event{{Stream: "o", Line: "GET / 200"}})
 	return nil
+}
+
+func (f *fakeBackend) Domains(context.Context, bool) (domains.Report, error) {
+	return domains.Report{Processes: []domains.ProcessDomains{{Name: "api", Ports: []int{3000}, Domains: []domains.Domain{{Host: "api.example.com", Scheme: "https", Source: "nginx"}}}}}, nil
 }
 
 func (f *fakeBackend) System(context.Context) (sysinfo.System, error) {
@@ -189,6 +194,7 @@ func TestEverythingPrivateNeedsASession(t *testing.T) {
 		{http.MethodPost, "/api/servers/local/processes/api/restart"},
 		{http.MethodPost, "/api/servers/local/save"},
 		{http.MethodGet, "/api/servers/local/system"},
+		{http.MethodGet, "/api/servers/local/domains"},
 	} {
 		if r := p.req(c.method, c.path, "", true); r.code != http.StatusUnauthorized {
 			t.Errorf("%s %s without session: %d", c.method, c.path, r.code)
@@ -355,6 +361,13 @@ func TestProcessesAndActions(t *testing.T) {
 
 	if r := p.req(http.MethodPost, "/api/servers/local/save", "", true); r.code != http.StatusOK || !strings.Contains(r.body, `"saved":2`) {
 		t.Fatalf("save: %d %s", r.code, r.body)
+	}
+	if r := p.req(http.MethodGet, "/api/servers/local/domains?refresh=1", "", true); r.code != http.StatusOK ||
+		!strings.Contains(r.body, `"host":"api.example.com"`) || !strings.Contains(r.body, `"ports":[3000]`) {
+		t.Fatalf("domains: %d %s", r.code, r.body)
+	}
+	if r := p.req(http.MethodGet, "/api/servers/nope/domains", "", true); r.code != http.StatusNotFound {
+		t.Fatalf("domains of an unknown server: %d", r.code)
 	}
 	if r := p.req(http.MethodGet, "/api/servers/local/system", "", true); r.code != http.StatusOK || !strings.Contains(r.body, `"hostname":"prod-1"`) {
 		t.Fatalf("system: %d %s", r.code, r.body)

@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/itsahmadnyc/procly/internal/domains"
 	"github.com/itsahmadnyc/procly/internal/logtail"
 	"github.com/itsahmadnyc/procly/internal/paths"
 	"github.com/itsahmadnyc/procly/internal/proc"
@@ -154,6 +155,15 @@ func (c *Client) Save(ctx context.Context) (int, error) {
 func (c *Client) System(ctx context.Context) (sysinfo.System, error) {
 	var out sysinfo.System
 	_, err := c.do(ctx, c.api, http.MethodGet, "/v1/system", &out)
+	return out, err
+}
+
+// Domains returns which names reach each process on the agent's machine.
+// Agents older than this feature answer 404. An agent keeps its answer for a
+// few seconds and has no way to be told to look again, so refresh is ignored.
+func (c *Client) Domains(ctx context.Context, _ bool) (domains.Report, error) {
+	var out domains.Report
+	_, err := c.do(ctx, c.api, http.MethodGet, "/v1/domains", &out)
 	return out, err
 }
 

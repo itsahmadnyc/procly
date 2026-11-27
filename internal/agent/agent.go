@@ -139,6 +139,14 @@ func (a *agent) handlers() http.Handler {
 	mux.HandleFunc("GET /v1/system", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, sysinfo.Read())
 	})
+	mux.HandleFunc("GET /v1/domains", func(w http.ResponseWriter, r *http.Request) {
+		rep, err := a.c.Domains(false)
+		if err != nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "procly daemon is not running on " + a.host})
+			return
+		}
+		writeJSON(w, http.StatusOK, rep)
+	})
 	mux.HandleFunc("POST /v1/processes/{name}/{action}", a.action)
 	mux.HandleFunc("POST /v1/save", func(w http.ResponseWriter, r *http.Request) {
 		n, _, err := a.c.Save()

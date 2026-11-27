@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/itsahmadnyc/procly/internal/client"
+	"github.com/itsahmadnyc/procly/internal/domains"
 	"github.com/itsahmadnyc/procly/internal/proc"
 )
 
@@ -80,7 +81,12 @@ type (
 	logTickMsg  struct{}
 	hostTickMsg struct{}
 	hostMsg     hostStats
-	listMsg     struct {
+	domainsMsg  struct {
+		rep domains.Report
+		err error
+	}
+	domainsTickMsg struct{}
+	listMsg        struct {
 		infos []proc.Info
 		err   error
 	}
@@ -142,6 +148,8 @@ type model struct {
 	flashErr   bool
 	flashAt    time.Time
 	host       hostStats
+	doms       domains.Report // which names reach which process, as the daemon last found
+	domsOK     bool           // doms holds an answer
 
 	lastScroll time.Time // when the last scroll step came, for speeding up
 	streak     int       // scroll steps in a row, each within scrollGap of the one before
@@ -159,13 +167,26 @@ func newModel(c *client.Client) model {
 	}
 }
 
-func (m model) Init() tea.Cmd { return tea.Batch(m.fetch(), logTick(), fetchHost()) }
+func (m model) Init() tea.Cmd { return tea.Batch(m.fetch(), logTick(), fetchHost(), m.fetchDomains()) }
 
 func (m model) fetch() tea.Cmd {
 	c := m.c
 	return func() tea.Msg {
 		infos, err := c.List()
 		return listMsg{infos, err}
+	}
+}
+
+// fetchDomains asks the daemon which domain names reach the processes. The
+// daemon keeps its answer for a few seconds, so asking is cheap.
+func (m model) fetchDomains() tea.Cmd {
+	c := m.c
+	if c == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		rep, err := c.Domains(false)
+		return domainsMsg{rep, err}
 	}
 }
 
@@ -198,6 +219,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Tick(hostEvery, func(time.Time) tea.Msg { return hostTickMsg{} })
 	case hostTickMsg:
 		return m, fetchHost()
+	case domainsMsg:
+		if msg.err == nil {
+			m.doms, m.domsOK = msg.rep, true
+		}
+		return m, tea.Tick(10*time.Second, func(time.Time) tea.Msg { return domainsTickMsg{} })
+	case domainsTickMsg:
+		return m, m.fetchDomains()
 	case actionMsg:
 		delete(m.busy, msg.name)
 		if msg.err != nil {

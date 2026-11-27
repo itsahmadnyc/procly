@@ -199,6 +199,7 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("GET /api/servers", s.private(s.serverList))
 	mux.HandleFunc("GET /api/servers/{server}/processes", s.private(s.withBackend(s.list)))
 	mux.HandleFunc("GET /api/servers/{server}/system", s.private(s.withBackend(s.system)))
+	mux.HandleFunc("GET /api/servers/{server}/domains", s.private(s.withBackend(s.domains)))
 	mux.HandleFunc("POST /api/servers/{server}/processes/{name}/{action}", s.private(s.csrf(s.withBackend(s.action))))
 	mux.HandleFunc("GET /api/servers/{server}/processes/{name}/logs", s.private(s.withBackend(s.logs)))
 	mux.HandleFunc("POST /api/servers/{server}/save", s.private(s.csrf(s.withBackend(s.save))))
@@ -457,6 +458,19 @@ func (s *server) system(w http.ResponseWriter, r *http.Request, b backend, serve
 		return
 	}
 	writeJSON(w, http.StatusOK, sys)
+}
+
+// domains says which names reach each process on a server, as found in that
+// machine's proxy configuration.
+func (s *server) domains(w http.ResponseWriter, r *http.Request, b backend, server string) {
+	ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
+	defer cancel()
+	rep, err := b.Domains(ctx, r.URL.Query().Get("refresh") == "1")
+	if err != nil {
+		writeError(w, server, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, rep)
 }
 
 // logs relays a process's output as server-sent events, whether it comes
