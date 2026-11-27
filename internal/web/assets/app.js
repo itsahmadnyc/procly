@@ -784,6 +784,7 @@ function openNewProcess() {
   if (S.server !== "local") { toast("New processes can only be started on this server. Agents refuse new commands.", true); return; }
   const form = $("new-form");
   form.reset();
+  paintNewMode();
   $("new-cwd").value = S.info.home || "/";
   $("new-host").textContent = S.info.host || "this server";
   $("new-error").textContent = "";
@@ -804,6 +805,13 @@ function parseEnv(text) {
   return env;
 }
 
+function paintNewMode() {
+  const cluster = $("new-mode").value === "cluster";
+  $("new-instances-label").textContent = cluster ? "Workers" : "Copies";
+  $("new-instances-hint").textContent = cluster ? "Node only. 0 means one worker per CPU; they share the app's ports." : "1 runs one process; more run separate copies named name-1, name-2, …";
+}
+$("new-mode").addEventListener("change", paintNewMode);
+
 $("new-cancel").addEventListener("click", () => $("new-dialog").close());
 $("new-form").addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -822,6 +830,8 @@ $("new-form").addEventListener("submit", async (e) => {
       cwd: $("new-cwd").value.trim(),
       health: $("new-health").value.trim(),
       autorestart: $("new-restart").checked,
+      exec_mode: $("new-mode").value,
+      instances: Number($("new-instances").value) || 0,
     });
     $("new-dialog").close();
     toast(`Started ${name}`);
@@ -1549,6 +1559,7 @@ PAGES.process = () => {
         h("button", { class: "btn", disabled: busy || !canRestart(p), title: canRestart(p) ? null : "Not supervised: stop it first", onclick: () => act(srv(), name(), "restart") }, icon("restart"), "Restart", h("kbd", { text: "r" })),
         p.reload_signal && p.status === "online" && h("button", { class: "btn", disabled: busy, title: `Sends ${p.reload_signal}; the process keeps running`, onclick: () => act(srv(), name(), "reload") }, icon("pulse"), "Reload"),
         h("button", { class: "btn", disabled: busy, onclick: () => toggle(srv(), name()) }, icon(running(p) ? "stop" : "play"), running(p) ? "Stop" : "Start", h("kbd", { text: "s" })),
+        srv() === "local" && h("button", { class: "btn", disabled: busy, title: "Fork or cluster", onclick: () => { const q = fresh(srv(), name()); if (q) changeMode(srv(), q); } }, icon("processes"), p.exec_mode === "cluster" ? "Cluster" : "Fork", icon("chevronDown")),
         h("button", { class: "btn ghost danger", disabled: busy, onclick: () => act(srv(), name(), "delete") }, icon("trash"), "Delete"));
 
       const calloutBox = h("div");

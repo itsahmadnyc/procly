@@ -135,6 +135,17 @@
         <label for="new-health">Health check <span class="muted">optional</span></label>
         <input id="new-health" name="health" spellcheck="false" autocomplete="off" placeholder="http://127.0.0.1:3000/health" class="mono">
       </div>
+      <div class="row2">
+        <div class="field">
+          <label for="new-mode">Mode</label>
+          <select id="new-mode" name="mode"><option value="fork">Fork: separate processes</option><option value="cluster">Cluster: workers share ports (Node)</option></select>
+        </div>
+        <div class="field">
+          <label for="new-instances" id="new-instances-label">Copies</label>
+          <input id="new-instances" name="instances" type="number" min="0" max="64" value="1" inputmode="numeric">
+        </div>
+      </div>
+      <p class="hintline muted" id="new-instances-hint"></p>
       <label class="check"><input type="checkbox" id="new-restart" checked> Restart when it crashes</label>
       <p class="error" id="new-error" role="alert"></p>
       <div class="dialog-actions">
