@@ -312,3 +312,83 @@ func TestKeysThatArriveTogether(t *testing.T) {
 		t.Fatal("a q among other keys should still quit")
 	}
 }
+
+func TestScrollSpeedsUpTheLongerItGoesOn(t *testing.T) {
+	clock := time.Unix(1000, 0)
+	now = func() time.Time { return clock }
+	defer func() { now = time.Now }()
+
+	var m model
+	if got := m.stepOf(3); got != 3 {
+		t.Fatalf("a single wheel step is 3 lines, got %d", got)
+	}
+	var steps []int
+	for i := 0; i < 60; i++ {
+		clock = clock.Add(20 * time.Millisecond) // a trackpad flick: 50 events a second
+		steps = append(steps, m.stepOf(1))
+	}
+	for i := 1; i < len(steps); i++ {
+		if steps[i] < steps[i-1] {
+			t.Fatalf("a long scroll never slows down: %v", steps)
+		}
+	}
+	if steps[0] != 1 || steps[len(steps)-1] != scrollMax {
+		t.Fatalf("starts at one line and ends at %d times that: %v", scrollMax, steps)
+	}
+	clock = clock.Add(2 * scrollGap) // the user stops, then scrolls again
+	if got := m.stepOf(1); got != 1 {
+		t.Fatalf("a pause starts the scroll over, got %d", got)
+	}
+	clock = clock.Add(scrollGap + 1)
+	if got := m.stepOf(1); got != 1 {
+		t.Fatalf("slow single steps stay single steps, got %d", got)
+	}
+}
+
+func TestHeldArrowKeyReachesTheTopInFewerPresses(t *testing.T) {
+	clock := time.Unix(1000, 0)
+	now = func() time.Time { return clock }
+	defer func() { now = time.Now }()
+
+	list := infos(t)
+	for i := 0; i < 400; i++ {
+		writeLog(t, list[0].OutLog, "line "+string(rune('A'+i%26)))
+	}
+	m := loadedWith(t, list, 100, 30)
+	m, _ = send(m, tea.KeyMsg{Type: tea.KeyTab})
+	presses := 0
+	for m.logOff < m.maxLogOff() && presses < 1000 {
+		clock = clock.Add(30 * time.Millisecond) // key repeat
+		m, _ = send(m, tea.KeyMsg{Type: tea.KeyUp})
+		presses++
+	}
+	if presses >= m.maxLogOff() {
+		t.Fatalf("holding the key should be faster than one line a press: %d presses for %d lines", presses, m.maxLogOff())
+	}
+	if m.logOff != m.maxLogOff() {
+		t.Fatalf("it still stops exactly at the oldest line: %d of %d", m.logOff, m.maxLogOff())
+	}
+}
+
+func TestFrameRate(t *testing.T) {
+	t.Setenv("SSH_CONNECTION", "")
+	t.Setenv("SSH_TTY", "")
+	t.Setenv("PROCLY_FPS", "")
+	if got := frameRate(); got != 30 {
+		t.Errorf("locally: %d", got)
+	}
+	t.Setenv("SSH_CONNECTION", "10.0.0.1 5000 10.0.0.2 22")
+	if got := frameRate(); got != 8 {
+		t.Errorf("over ssh the screen is sent less often: %d", got)
+	}
+	t.Setenv("PROCLY_FPS", "45")
+	if got := frameRate(); got != 45 {
+		t.Errorf("PROCLY_FPS wins: %d", got)
+	}
+	for _, bad := range []string{"0", "100", "fast", "-3"} {
+		t.Setenv("PROCLY_FPS", bad)
+		if got := frameRate(); got != 8 {
+			t.Errorf("PROCLY_FPS=%q is ignored, got %d", bad, got)
+		}
+	}
+}

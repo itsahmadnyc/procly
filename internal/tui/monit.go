@@ -32,8 +32,47 @@ func Run(c *client.Client) error {
 	case "dark":
 		lipgloss.SetHasDarkBackground(true)
 	}
-	_, err := tea.NewProgram(newModel(c), tea.WithAltScreen(), tea.WithMouseCellMotion()).Run()
+	_, err := tea.NewProgram(newModel(c), tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithFPS(frameRate())).Run()
 	return err
+}
+
+// now is the clock, replaced in tests.
+var now = time.Now
+
+const (
+	scrollGap = 150 * time.Millisecond // steps closer than this belong to one scroll
+	scrollMax = 8                      // how many times faster a long scroll gets
+)
+
+// stepOf is how many lines one scroll step moves: base for the first, then
+// faster the longer the scroll goes on (a held key, a trackpad flick), up to
+// scrollMax times. A long scroll then reaches its place in fewer frames,
+// which is what a slow link needs; a single step stays one step.
+func (m *model) stepOf(base int) int {
+	t := now()
+	if t.Sub(m.lastScroll) < scrollGap {
+		m.streak++
+	} else {
+		m.streak = 0
+	}
+	m.lastScroll = t
+	return base * min(1+m.streak/5, scrollMax)
+}
+
+// frameRate is how often the screen is sent to the terminal at most. Scrolling
+// the logs changes most of the screen on every frame, about 7 KB, so 60 frames
+// a second is 400 KB/s: more than a link with some latency takes in, and the
+// screen then keeps moving for seconds after you stop. Over SSH the rate is
+// lower. PROCLY_FPS sets it (1 to 60).
+func frameRate() int {
+	fps := 30
+	if os.Getenv("SSH_CONNECTION") != "" || os.Getenv("SSH_TTY") != "" {
+		fps = 8
+	}
+	if n, err := strconv.Atoi(os.Getenv("PROCLY_FPS")); err == nil && n >= 1 && n <= 60 {
+		fps = n
+	}
+	return fps
 }
 
 type (
@@ -103,6 +142,9 @@ type model struct {
 	flashErr   bool
 	flashAt    time.Time
 	host       hostStats
+
+	lastScroll time.Time // when the last scroll step came, for speeding up
+	streak     int       // scroll steps in a row, each within scrollGap of the one before
 }
 
 func newModel(c *client.Client) model {
@@ -372,13 +414,13 @@ func (m model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "up", "k":
 		if inLogs {
-			m.scrollLogs(1)
+			m.scrollLogs(m.stepOf(1))
 		} else {
 			m.move(-1)
 		}
 	case "down", "j":
 		if inLogs {
-			m.scrollLogs(-1)
+			m.scrollLogs(-m.stepOf(1))
 		} else {
 			m.move(1)
 		}
@@ -531,9 +573,9 @@ func (m model) mouse(e tea.MouseMsg) (tea.Model, tea.Cmd) {
 	case l.logs.has(e.X, e.Y):
 		switch e.Button {
 		case tea.MouseButtonWheelUp:
-			m.scrollLogs(3)
+			m.scrollLogs(m.stepOf(3))
 		case tea.MouseButtonWheelDown:
-			m.scrollLogs(-3)
+			m.scrollLogs(-m.stepOf(3))
 		case tea.MouseButtonLeft:
 			if e.Action == tea.MouseActionPress && !m.zoom {
 				m.focus = paneLogs
