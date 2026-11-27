@@ -349,6 +349,8 @@ type startRequest struct {
 	Env         map[string]string `json:"env"`
 	AutoRestart *bool             `json:"autorestart"`
 	Health      string            `json:"health"`
+	ExecMode    string            `json:"exec_mode"`
+	Instances   int               `json:"instances"`
 }
 
 // start runs a new command on this machine. The panel is an admin tool, so
@@ -369,6 +371,10 @@ func (s *server) start(w http.ResponseWriter, r *http.Request, b backend, server
 	spec := proc.Spec{
 		Name: strings.TrimSpace(req.Name), Command: strings.TrimSpace(req.Command), Cwd: strings.TrimSpace(req.Cwd),
 		Env: req.Env, AutoRestart: req.AutoRestart, Health: strings.TrimSpace(req.Health),
+		ExecMode: strings.TrimSpace(req.ExecMode), Instances: req.Instances,
+	}
+	if spec.ExecMode == proc.ExecFork && spec.Instances <= 1 {
+		spec.ExecMode, spec.Instances = "", 0 // plain single process, as before
 	}
 	if spec.Env == nil {
 		spec.Env = map[string]string{}

@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.5.2
+
+- **Mode where you can see it**: the New process dialog has Mode (fork or cluster) and Workers/Copies, and a process page has a Fork/Cluster button in its header that opens the switch dialog. Starting a process from the panel can now run it as a cluster.
+
 ## v0.5.1
 
 - **Sign-in page** now fills the whole window (illustration on the left, form on the right) instead of a centered card.
