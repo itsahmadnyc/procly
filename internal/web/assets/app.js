@@ -465,8 +465,16 @@ function cmdline(text) {
     h("button", { class: "icon-btn", type: "button", title: "Copy", "aria-label": "Copy command", onclick: () => copyText(text) }, icon("copy")));
 }
 
+function emptyArt() {
+  const svg = svgEl("svg", { class: "empty-art", viewBox: "0 0 120 80", "aria-hidden": "true" });
+  svg.append(
+    svgEl("rect", { class: "ea-card", x: 14, y: 10, width: 92, height: 22, rx: 6 }), svgEl("rect", { class: "ea-bar", x: 26, y: 18, width: 44, height: 6, rx: 3 }), svgEl("circle", { class: "ea-dot", cx: 94, cy: 21, r: 3.5 }),
+    svgEl("rect", { class: "ea-card", x: 14, y: 40, width: 92, height: 22, rx: 6 }), svgEl("rect", { class: "ea-bar", x: 26, y: 48, width: 62, height: 6, rx: 3 }), svgEl("rect", { class: "ea-acc", x: 26, y: 48, width: 24, height: 6, rx: 3 }));
+  return svg;
+}
+
 function emptyBox(ic, title, text, extra) {
-  return h("div", { class: "empty-box" }, icon(ic), h("b", { text: title }), text && h("div", { text }), extra);
+  return h("div", { class: "empty-box" }, emptyArt(), h("b", { text: title }), text && h("div", { text }), extra);
 }
 
 const EVENT = {
@@ -565,6 +573,138 @@ function confirmDialog({ ic, tone, title, text, ok, danger, type }) {
 // OK is the form's only submit button, so Enter confirms, and does nothing
 // while OK is disabled (the name isn't typed yet).
 $("confirm-cancel").addEventListener("click", () => $("confirm").close("cancel"));
+
+
+// ---------- terminal themes ----------
+
+// [background, text, dim, error, line, control, control-on, control text, input]
+const TERM_THEMES = {
+  procly: ["Procly", null],
+  dracula: ["Dracula", ["#282a36", "#f8f8f2", "#6272a4", "#ff5555", "#343746", "#343746", "#44475a", "#f8f8f2", "#21222c"]],
+  one: ["One Dark", ["#282c34", "#abb2bf", "#5c6370", "#e06c75", "#333842", "#333842", "#3e4451", "#d7dae0", "#21252b"]],
+  nord: ["Nord", ["#2e3440", "#d8dee9", "#6b7690", "#bf616a", "#3b4252", "#3b4252", "#4c566a", "#eceff4", "#272c36"]],
+  monokai: ["Monokai", ["#272822", "#f8f8f2", "#75715e", "#f92672", "#34352e", "#34352e", "#49483e", "#f8f8f2", "#1e1f1c"]],
+  tokyo: ["Tokyo Night", ["#1a1b26", "#c0caf5", "#565f89", "#f7768e", "#24283b", "#24283b", "#33395a", "#c0caf5", "#16161e"]],
+  gruvbox: ["Gruvbox", ["#282828", "#ebdbb2", "#928374", "#fb4934", "#3c3836", "#3c3836", "#504945", "#fbf1c7", "#1d2021"]],
+  tomorrow: ["Tomorrow Night", ["#1d1f21", "#c5c8c6", "#707880", "#cc6666", "#282a2e", "#282a2e", "#373b41", "#ffffff", "#161719"]],
+  solarized: ["Solarized Dark", ["#002b36", "#93a1a1", "#586e75", "#dc322f", "#073642", "#073642", "#0f4a59", "#eee8d5", "#00252e"]],
+  solarlight: ["Solarized Light", ["#fdf6e3", "#586e75", "#93a1a1", "#dc322f", "#eee8d5", "#eee8d5", "#ddd6c1", "#073642", "#f5eed9"]],
+  github: ["GitHub Light", ["#ffffff", "#24292f", "#8c959f", "#cf222e", "#d8dee4", "#eaeef2", "#d0d7de", "#1f2328", "#f6f8fa"]],
+};
+const TERM_VARS = ["--term-bg", "--term-text", "--term-dim", "--term-err", "--term-line", "--tc-ctl", "--tc-on", "--tc-on-text", "--tc-text", "--tc-input"];
+const TERM_ORDER = [0, 1, 2, 3, 4, 5, 6, 7, 7, 8]; // --tc-text reuses the control text
+
+function applyTerm() {
+  const root = document.documentElement;
+  const id = load("procly.term") || "procly";
+  const t = (TERM_THEMES[id] || TERM_THEMES.procly)[1];
+  TERM_VARS.forEach((v, i) => (t ? root.style.setProperty(v, t[TERM_ORDER[i]]) : root.style.removeProperty(v)));
+  const size = Number(load("procly.termsize")) || 0;
+  size ? root.style.setProperty("--term-size", size + "px") : root.style.removeProperty("--term-size");
+}
+
+// formDialog asks for a few values. submit(values) returns an error to show
+// and keep the dialog open, or null to close it; "" keeps it open silently
+// (the person said no in a second question).
+function formDialog({ title, text, fields, ok, build, submit }) {
+  const dlg = h("dialog", { class: "dialog form-dialog" });
+  const err = h("p", { class: "error", role: "alert" });
+  const inputs = {};
+  const form = h("form", { novalidate: "" },
+    h("div", { class: "dialog-head" }, h("div", {}, h("h3", { text: title }), text && h("p", { class: "muted", text: text }))),
+    build ? build(inputs) : null,
+    ...(fields || []).map((f) => {
+      const input = h("input", { id: "fd-" + f.name, name: f.name, type: f.type || "text", autocomplete: f.autocomplete || "off", spellcheck: "false" });
+      inputs[f.name] = input;
+      return h("div", { class: "field" }, h("label", { for: "fd-" + f.name, text: f.label }), input, f.hint && h("p", { class: "hintline", text: f.hint }));
+    }),
+    err,
+    h("div", { class: "dialog-actions" },
+      h("button", { type: "button", class: "btn", onclick: () => dlg.close() }, "Cancel"),
+      h("button", { type: "submit", class: "btn primary", text: ok })));
+  dlg.append(form);
+  document.body.append(dlg);
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const btn = form.querySelector("button[type=submit]");
+    btn.disabled = true;
+    err.textContent = "";
+    const values = {};
+    for (const [k, el] of Object.entries(inputs)) values[k] = el.value !== undefined ? el.value : "";
+    let msg;
+    try { msg = await submit(values, inputs); } catch (x) { msg = x.message; }
+    btn.disabled = false;
+    if (msg === null) dlg.close(); else err.textContent = msg;
+  });
+  dlg.addEventListener("close", () => dlg.remove());
+  dlg.showModal();
+  const first = form.querySelector("input,select");
+  if (first) first.focus();
+}
+
+function changePassword() {
+  formDialog({
+    title: "Change the panel password", ok: "Continue",
+    text: "You will be asked to confirm. Browsers signed in elsewhere are signed out; this one stays signed in.",
+    fields: [
+      { name: "current", label: "Current password", type: "password", autocomplete: "current-password" },
+      { name: "next", label: "New password", type: "password", autocomplete: "new-password", hint: "At least 10 characters." },
+      { name: "again", label: "New password again", type: "password", autocomplete: "new-password" },
+    ],
+    async submit(v) {
+      if (!v.current) return "Enter the current password.";
+      if (v.next.length < 10) return "The new password needs at least 10 characters.";
+      if (v.next !== v.again) return "The two new passwords are not the same.";
+      const yes = await confirmDialog({ ic: "key", tone: "warn", title: "Change the password?", text: "From now on this new password signs you in. Other browsers that are signed in will be signed out.", ok: "Change password" });
+      if (!yes) return "";
+      try {
+        const r = await api("POST", "/api/password", { current: v.current, next: v.next });
+        toast(r.signed_out ? `Password changed. ${plural(r.signed_out, "other session")} signed out.` : "Password changed.");
+        return null;
+      } catch (e) { return e.message; }
+    },
+  });
+}
+
+// changeMode switches an app between fork (separate processes) and cluster
+// (workers sharing its ports). It restarts the app, so it asks twice.
+function changeMode(server, p) {
+  if (server !== "local") { toast("The mode can only be changed on this server.", true); return; }
+  let mode = p.exec_mode === "cluster" ? "cluster" : "fork";
+  const current = mode;
+  formDialog({
+    title: `Run ${p.name} in…`, ok: "Continue",
+    text: "Fork runs separate processes. Cluster runs one Node app as several workers that share its ports.",
+    build(inputs) {
+      const wrap = h("div", {});
+      const opts = {};
+      const workers = h("input", { id: "fd-workers", type: "number", min: "0", max: "64", value: String(p.instances > 1 ? p.instances : 2) });
+      inputs.workers = workers;
+      const field = h("div", { class: "field" }, h("label", { for: "fd-workers", text: "Workers" }), workers, h("p", { class: "hintline", text: "0 means one worker per CPU." }));
+      const paint = () => { for (const [m, b] of Object.entries(opts)) b.setAttribute("aria-pressed", String(m === mode)); field.hidden = mode !== "cluster"; };
+      for (const [m, name, sub] of [["fork", "Fork", "separate processes, any command"], ["cluster", "Cluster", "Node only, shares ports, rolling reload"]]) {
+        opts[m] = h("button", { type: "button", class: "mode-opt", onclick: () => { mode = m; paint(); } }, h("b", { text: name }), h("span", { text: sub }));
+      }
+      wrap.append(h("div", { class: "mode-opts" }, opts.fork, opts.cluster), field);
+      paint();
+      return wrap;
+    },
+    async submit(v) {
+      const n = Number(v.workers);
+      if (mode === "cluster" && (!Number.isInteger(n) || n < 0 || n > 64)) return "Workers must be a whole number from 0 to 64.";
+      if (mode === current && (mode === "fork" || n === (p.instances || 0))) return "It already runs that way.";
+      const yes = await confirmDialog({ ic: "restart", tone: "warn", title: `Switch ${p.name} to ${mode}?`,
+        text: `procly restarts it in ${mode} mode${mode === "cluster" ? ` with ${n || "one per CPU"} workers` : ""}. It is down for a moment. If it cannot run that way, it keeps running as it is.`, ok: "Switch and restart" });
+      if (!yes) return "";
+      try {
+        await api("POST", `${srvPath(server)}/processes/${encodeURIComponent(p.name)}/mode`, { mode, instances: mode === "cluster" ? n : 0 });
+        toast(`${p.name} now runs in ${mode} mode. Save the list to keep it after a reboot.`);
+        await loadProcs(server); refresh();
+        return null;
+      } catch (e) { return e.message; }
+    },
+  });
+}
 
 // ---------- actions ----------
 
@@ -1324,6 +1464,7 @@ function procMenu(server, p) {
     { label: "Restart", icon: "restart", disabled: busy || !canRestart(p), onclick: () => act(server, p.name, "restart") },
     p.reload_signal && p.status === "online" && { label: "Reload", icon: "pulse", disabled: busy, onclick: () => act(server, p.name, "reload") },
     { label: running(p) ? "Stop" : "Start", icon: running(p) ? "stop" : "play", disabled: busy, onclick: () => act(server, p.name, toggleVerb(p)) },
+    server === "local" && { label: "Change mode…", icon: "processes", disabled: busy, onclick: () => changeMode(server, p) },
     "sep",
     { label: "Logs", icon: "terminal", onclick: () => go(base + "/logs") },
     { label: "Events", icon: "events", onclick: () => go(base + "/events") },
@@ -1480,6 +1621,7 @@ TAB_PAGES.overview = (srv, name) => {
       add("Directory", p.cwd);
       if (dm && dm.ports.length) add("Listens on", dm.ports.map((x) => ":" + x).join("  "));
       add("Domain", domainFact(srv(), p, dm, de));
+      add("Mode", h("span", { class: "mode-fact" }, p.exec_mode === "cluster" ? `Cluster, ${p.instances > 1 ? plural(p.instances, "worker") : "workers per CPU"}` : "Fork", srv() === "local" ? h("button", { class: "btn small", type: "button", onclick: () => { const q = fresh(srv(), name()); if (q) changeMode(srv(), q); } }, "Change") : null));
       add("Autorestart", p.autorestart ? `on, gives up after ${p.max_restarts} quick crashes` : "off");
       if (p.health_check) add("Health check", `${p.health || "not running"} · ${p.health_check}`, p.health === "healthy" ? "good" : p.health === "unhealthy" ? "bad" : "");
       if (p.restart_every || p.restart_at) add("Scheduled restart", [p.restart_every && `every ${p.restart_every} after a start`, p.restart_at && `every day at ${p.restart_at} (server time)`].filter(Boolean).join(" and "));
@@ -1586,7 +1728,7 @@ TAB_PAGES.config = () => {
 };
 
 TAB_PAGES.logs = (srv, name) => {
-  let refs, filter = "", only = "all", wrap = load("procly.wrap") === "1", follow = true, paused = false;
+  let refs, filter = "", only = "all", wrap = load("procly.wrap") !== "0", follow = true, paused = false;
   const matches = (ln) => (only === "all" || (only === "err") === ln.e) && (!filter || ln.t.toLowerCase().includes(filter));
 
   function lineEl(ln) {
@@ -1648,7 +1790,7 @@ TAB_PAGES.logs = (srv, name) => {
       }
       refs.search.addEventListener("input", () => { filter = refs.search.value.toLowerCase(); renderAll(); });
       refs.wrapBtn.addEventListener("click", () => {
-        wrap = !wrap; store("procly.wrap", wrap ? "1" : null);
+        wrap = !wrap; store("procly.wrap", wrap ? null : "0");
         refs.log.classList.toggle("wrap", wrap); refs.wrapBtn.setAttribute("aria-pressed", String(wrap));
       });
       refs.pauseBtn.addEventListener("click", () => {
@@ -1804,9 +1946,16 @@ PAGES.server = () => {
       const add = (k, v) => facts.append(h("dt", { text: k }), h("dd", { text: v || "–", title: v || "" }));
       if (sys) {
         add("Hostname", sys.hostname); add("System", sys.distro || sys.os); add("Kernel", sys.kernel); add("Architecture", sys.arch);
-        add("CPU cores", String(sys.cpus)); add("procly", sys.version);
+        add("CPU", [sys.cpu_model, plural(sys.cpus, "core")].filter(Boolean).join(" · "));
+        add("Memory", sys.mem_total ? fmtBytes(sys.mem_total) + (sys.mem_available ? `, ${fmtBytes(sys.mem_available)} free` : "") : "");
+        if (sys.swap_total) add("Swap", `${fmtBytes(sys.swap_total)}, ${fmtBytes(sys.swap_free)} free`);
+        add("Disk", sys.disk_total ? `${fmtBytes(sys.disk_total)}, ${fmtBytes(sys.disk_free)} free` : "");
+        add("Uptime", fmtUptime(sys.uptime_s * 1000));
+        add("Node", sys.node); add("Runs as", sys.user); add("Time zone", sys.timezone);
+        add("procly", sys.version);
       }
-      add("Address", !s ? "" : s.local ? "local socket" : s.url === "tunnel" ? "tunnel through the hub" : s.url);
+      if (sys && sys.addrs && sys.addrs.length) for (const a of sys.addrs) add("Address", a);
+      add("Reached through", !s ? "" : s.local ? "local socket" : s.url === "tunnel" ? "tunnel through the hub" : s.url);
       fill(refs.facts, ...facts.childNodes);
 
       const top = [...list].filter((p) => p.pid).sort((a, b) => b.cpu - a.cpu || b.memory - a.memory).slice(0, 6);
@@ -1825,7 +1974,10 @@ PAGES.settings = () => {
   return {
     mount(root) {
       document.title = "Settings · procly";
-      refs = { theme: h("div", { class: "seg", role: "group", "aria-label": "Theme" }), panel: h("dl", { class: "facts" }) };
+      refs = { theme: h("div", { class: "seg", role: "group", "aria-label": "Theme" }), panel: h("dl", { class: "facts" }),
+        themes: h("div", { class: "theme-grid", role: "group", "aria-label": "Terminal theme" }), preview: h("div", { class: "log-preview" }), size: h("div", { class: "seg", role: "group", "aria-label": "Text size" }),
+        wrapBox: h("input", { type: "checkbox" }) };
+      refs.wrapBox.addEventListener("change", () => { store("procly.wrap", refs.wrapBox.checked ? null : "0"); });
       const keyRow = (label, ...keys) => h("div", { class: "key-row" }, h("span", { text: label }), h("span", { class: "keys" }, keys.map((k) => h("kbd", { text: k }))));
       root.append(h("div", { class: "page" },
         pageHead({ title: "Settings", sub: "This panel and how procly reaches you." }),
@@ -1834,6 +1986,11 @@ PAGES.settings = () => {
           h("div", { class: "card" },
             h("div", { class: "card-title" }, icon("monitor"), h("h2", { text: "Appearance" })),
             h("div", { class: "set-row" }, h("div", { class: "grow" }, h("b", { text: "Theme" }), h("p", { text: "System follows your computer. Saved in this browser." })), refs.theme)),
+          h("div", { class: "card" },
+            h("div", { class: "card-title" }, icon("terminal"), h("h2", { text: "Log terminal" })),
+            h("div", { class: "set-row" }, h("div", { class: "grow" }, h("b", { text: "Color theme" }), h("p", { text: "How the logs look. Saved in this browser." }))),
+            refs.themes, refs.preview,
+            h("div", { class: "set-inline" }, h("span", { class: "muted", text: "Text size" }), refs.size, h("label", { class: "check" }, refs.wrapBox, "Wrap long lines"))),
           h("div", { class: "card" },
             h("div", { class: "card-title" }, icon("bell"), h("h2", { text: "Alerts" })),
             h("div", { class: "set-row" }, h("div", { class: "grow" }, h("b", { text: "Crash and health alerts" }), h("p", { text: "procly messages you when a process crashes, gives up or fails its health check. At most one message per process every 5 minutes." }))),
@@ -1845,6 +2002,7 @@ PAGES.settings = () => {
           h("div", { class: "card" },
             h("div", { class: "card-title" }, icon("key"), h("h2", { text: "Panel" }), h("button", { class: "btn small right", onclick: logout }, icon("logout"), "Sign out")),
             refs.panel,
+            h("div", { class: "set-row" }, h("div", { class: "grow" }, h("b", { text: "Password" }), h("p", { text: "Change the password that signs you in to this panel." })), h("button", { class: "btn", onclick: changePassword }, icon("key"), "Change password")),
             h("div", { class: "set-row" }, h("div", { class: "grow" }, h("b", { text: "Forgot the password?" }), h("p", { text: "Stop the running panel, then start it again with this flag. It prints a new password and signs every session out." })), cmdline("procly web --reset-password"))),
           h("div", { class: "card", id: "keys" },
             h("div", { class: "card-title" }, icon("keyboard"), h("h2", { text: "Keyboard shortcuts" })),
@@ -1859,6 +2017,19 @@ PAGES.settings = () => {
       const cur = load("procly.theme") || "system";
       fill(refs.theme, ...[["system", "System", "monitor"], ["light", "Light", "sun"], ["dark", "Dark", "moon"]].map(([id, label, ic]) =>
         h("button", { type: "button", "aria-pressed": String(cur === id), onclick: () => { setTheme(id); this.update(); } }, icon(ic), label)));
+      const tid = load("procly.term") || "procly";
+      const tsize = load("procly.termsize") || "";
+      refs.themes.replaceChildren(...Object.entries(TERM_THEMES).map(([id, [name, t]]) => {
+        const b = h("button", { type: "button", class: "theme-tile", "aria-pressed": String(id === tid), onclick: () => { store("procly.term", id === "procly" ? null : id); applyTerm(); this.update(); } },
+          h("span", { class: "tt-sample", text: "GET /api 200\nerror: timeout" }), h("span", { class: "tt-name", text: name }));
+        const bg = t ? t[0] : "#0f1115", fg = t ? t[1] : "#d9dbdf";
+        b.firstChild.style.background = bg; b.firstChild.style.color = fg;
+        return b;
+      }));
+      refs.preview.replaceChildren(h("div", { class: "ln dim", text: "12:04:11  listening on :3000" }), h("div", { class: "ln", text: "12:04:15  GET /api/items 200 12ms" }), h("div", { class: "ln err", text: "12:04:19  error: connection refused (retrying)" }));
+      refs.size.replaceChildren(...[["", "Auto"], ["12", "12"], ["13", "13"], ["14", "14"], ["16", "16"]].map(([v, label]) =>
+        h("button", { type: "button", "aria-pressed": String(tsize === v), onclick: () => { store("procly.termsize", v || null); applyTerm(); this.update(); } }, label)));
+      refs.wrapBox.checked = load("procly.wrap") !== "0";
       fill(refs.panel, 
         h("dt", { text: "Server" }), h("dd", { text: S.info.host }),
         h("dt", { text: "Version" }), h("dd", { text: S.info.version }),
@@ -1966,4 +2137,5 @@ async function startApp() {
 }
 
 applyTheme();
+applyTerm();
 startApp();
