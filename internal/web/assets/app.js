@@ -1268,6 +1268,8 @@ PAGES.processes = () => {
         sub: h("span"),
         search: h("input", { type: "search", placeholder: "Filter by name or command", "aria-label": "Filter processes", spellcheck: "false", autocomplete: "off" }),
         seg: h("div", { class: "seg", role: "group", "aria-label": "Show" }),
+        strip: h("div", { class: "pstrip" }),
+        sort: h("select", { class: "sort", "aria-label": "Sort by" }, ...[["name", "Sort: name"], ["cpu", "Sort: CPU"], ["memory", "Sort: memory"], ["restarts", "Sort: restarts"], ["uptime", "Sort: uptime"]].map(([v, t]) => h("option", { value: v, text: t }))),
         shown: h("span", { class: "muted mono" }),
         table: h("table", { class: "table" }),
         body: h("tbody"),
@@ -1276,15 +1278,18 @@ PAGES.processes = () => {
         actions: h("div", { class: "page-actions" }),
       };
       refs.search.addEventListener("input", () => { filter = refs.search.value; this.update(); });
+      refs.sort.value = load("procly.sort") || "name";
+      refs.sort.addEventListener("change", () => { store("procly.sort", refs.sort.value === "name" ? null : refs.sort.value); this.update(); });
       root.append(h("div", { class: "page" },
         h("div", { class: "page-head" },
           h("div", { class: "page-title" }, h("h1", { text: "Processes" }), h("p", {}, refs.sub)),
           refs.actions),
+        refs.strip,
         h("div", { class: "card" },
           h("div", { class: "toolbar" },
             h("label", { class: "search" }, icon("search"), refs.search, h("kbd", { text: "/" })),
             refs.seg,
-            h("div", { class: "right" }, refs.shown)),
+            h("div", { class: "right" }, refs.sort, refs.shown)),
           h("div", { class: "table-wrap" },
             h("table", { class: "table" },
               h("thead", {}, h("tr", {},
@@ -1325,6 +1330,19 @@ PAGES.processes = () => {
         (show === "all" || (show === "running" && p.status === "online") || (show === "issues" && needsAttention(p)) || (show === "stopped" && p.status === "stopped")) &&
         (!f || p.name.toLowerCase().includes(f) || p.command.toLowerCase().includes(f)));
       refs.shown.textContent = list.length ? `${vis.length} of ${list.length}` : "";
+      S.maxMem = Math.max(1, ...list.map((p) => p.memory || 0));
+      const order = refs.sort.value;
+      const keyOf = { cpu: (p) => -p.cpu, memory: (p) => -p.memory, restarts: (p) => -p.restarts, uptime: (p) => -(p.pid > 0 ? p.uptime_ms : -1), name: (p) => 0 }[order];
+      if (order !== "name") vis.sort((a, b) => keyOf(a) - keyOf(b) || a.name.localeCompare(b.name));
+      const upAll = list.filter((p) => p.pid > 0);
+      const cell = (label, value, sub, tone) => h("div", { class: "pcell" }, h("span", { class: "plabel", text: label }), h("b", { class: tone || "", text: value }), sub && h("span", { class: "psub", text: sub }));
+      fill(refs.strip,
+        cell("Running", `${c.online}`, `of ${list.length}`, c.online === list.length && list.length ? "good" : ""),
+        cell("Need attention", String(issues), issues ? "see the Issues filter" : "all clear", issues ? "bad" : ""),
+        cell("CPU", upAll.reduce((a, p) => a + p.cpu, 0).toFixed(1) + "%", "all processes"),
+        cell("Memory", fmtBytes(upAll.reduce((a, p) => a + p.memory, 0)), "all processes"),
+        cell("Restarts", String(list.reduce((a, p) => a + p.restarts, 0)), "since start"));
+      refs.strip.hidden = !list.length;
 
       // Instances of one app read as one row that opens. Searching opens them all,
       // so a match inside a group is never hidden.
@@ -1395,8 +1413,8 @@ function domainCell(server, names) {
 
 // A number with a short bar beside it. Without a bar the space is kept, so a
 // column of numbers stays lined up.
-function meterEl(text, frac) {
-  const bar = h("span", { class: "mbar" + (frac == null ? " none" : frac >= 0.9 ? " bad" : frac >= 0.7 ? " warn" : "") }, h("i"));
+function meterEl(text, frac, plain) {
+  const bar = h("span", { class: "mbar" + (frac == null ? " none" : plain ? "" : frac >= 0.9 ? " bad" : frac >= 0.7 ? " warn" : "") }, h("i"));
   bar.firstChild.style.width = (Math.min(Math.max(frac || 0, 0), 1) * 100).toFixed(0) + "%";
   return h("div", { class: "cell-meter" }, h("span", { text }), bar);
 }
@@ -1422,7 +1440,7 @@ function groupRow(server, group, members, open, onToggle) {
   const verbOf = () => (members.some(running) ? "stop" : "start");
   return h("tr", { class: "click group-row", "data-key": "g:" + group, onclick: onToggle, "aria-expanded": String(open) },
     h("td", {}, h("div", { class: "group-name" }, h("span", { class: "chev" + (open ? " open" : "") }, icon("chevronRight")),
-      h("div", { class: "cell-name" }, h("b", { text: group, title: group }), h("span", { text: `${n} instances · ${members[0].command}`, title: members[0].command })))),
+      h("div", { class: "cell-name two" }, h("div", { class: "name-line" }, h("b", { text: group, title: group }), h("span", { class: "tag", text: `${n} copies` })), h("span", { class: "cmd", text: members[0].command, title: members[0].command })))),
     h("td", {}, busy ? h("span", { class: "status waiting", text: progressive[S.busy.get(key(server, group))] } ) : h("span", { class: "status " + sum.cls, text: sum.text })),
     h("td", { class: "col-domain hide-lg" }, domainCell(server, members.map((p) => p.name))),
     h("td", { class: "col-health hide-md" }, h("span", { class: "health-ic none", text: members.some((p) => p.health === "unhealthy") ? "unhealthy" : "–" })),
@@ -1453,12 +1471,14 @@ function procRow(server, p, child) {
   const up = p.pid > 0;
   const busy = S.busy.has(key(server, p.name));
   const tr = h("tr", { class: "click" + (child ? " child-row" : ""), "data-key": "p:" + p.name, onclick: () => go(href) },
-    h("td", {}, h("div", { class: "cell-name" }, h("a", { class: "name", href, text: p.name, title: p.name }), h("span", { text: p.command, title: p.command }))),
+    h("td", {}, h("div", { class: "cell-name two" },
+      h("div", { class: "name-line" }, h("a", { class: "name", href, text: p.name, title: p.name }), p.exec_mode === "cluster" && h("span", { class: "tag", text: p.instances > 1 ? `cluster ×${p.instances}` : "cluster" })),
+      h("span", { class: "cmd", text: p.command, title: p.command }))),
     h("td", {}, statusEl(server, p)),
     h("td", { class: "col-domain hide-lg" }, domainCell(server, [p.name])),
     h("td", { class: "col-health hide-md" }, healthEl(p)),
     h("td", { class: "num r" + (up ? "" : " dim") }, meterEl(up ? p.cpu.toFixed(1) + "%" : "–", up ? p.cpu / 100 : null)),
-    h("td", { class: "num r hide-sm" + (up ? "" : " dim") }, meterEl(up ? fmtBytes(p.memory) : "–", up && p.max_memory ? p.memory / p.max_memory : null)),
+    h("td", { class: "num r hide-sm" + (up ? "" : " dim") }, meterEl(up ? fmtBytes(p.memory) : "–", !up ? null : p.max_memory ? p.memory / p.max_memory : p.memory / (S.maxMem || 1), !p.max_memory)),
     h("td", { class: "num r hide-sm" + (up ? "" : " dim"), text: up ? fmtUptime(p.uptime_ms) : "–" }),
     h("td", { class: "num r hide-sm" + (p.restarts ? " warn" : " dim"), text: p.restarts }),
     h("td", {}, h("div", { class: "cell-actions" },
