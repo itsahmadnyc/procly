@@ -35,6 +35,44 @@ func readStats(pids []int) map[int]procStat {
 	return stats
 }
 
+// readGroupStats sums CPU and memory over every process in each process group.
+func readGroupStats(groups []int) map[int]procStat {
+	want := map[int]bool{}
+	for _, g := range groups {
+		want[g] = true
+	}
+	out := map[int]procStat{}
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return out
+	}
+	up := uptimeSeconds()
+	page := int64(os.Getpagesize())
+	for _, e := range entries {
+		pid, err := strconv.Atoi(e.Name())
+		if err != nil {
+			continue
+		}
+		pg, ok := pgrpOf(pid)
+		if !ok || !want[pg] {
+			continue
+		}
+		dir := "/proc/" + e.Name()
+		st, err1 := os.ReadFile(dir + "/stat")
+		sm, err2 := os.ReadFile(dir + "/statm")
+		if err1 != nil || err2 != nil {
+			continue
+		}
+		if s, ok := parseProcStat(string(st), string(sm), up, page); ok {
+			g := out[pg]
+			g.cpu += s.cpu
+			g.rss += s.rss
+			out[pg] = g
+		}
+	}
+	return out
+}
+
 func uptimeSeconds() float64 {
 	b, err := os.ReadFile("/proc/uptime")
 	if err != nil {

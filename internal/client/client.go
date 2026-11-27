@@ -80,6 +80,15 @@ func (c *Client) Stop(target string) ([]proc.Info, error) {
 	return c.many(http.MethodPost, "/v1/processes/"+url.PathEscape(target)+"/stop")
 }
 
+// SetMode changes how an app runs: "fork" (separate processes) or "cluster"
+// (workers sharing the app's ports). instances is the worker count in cluster
+// mode, or how many separate processes in fork mode; 0 picks a default.
+func (c *Client) SetMode(target, mode string, instances int) ([]proc.Info, error) {
+	var out []proc.Info
+	body := map[string]any{"mode": mode, "instances": instances}
+	return out, c.call(context.Background(), http.MethodPost, "/v1/processes/"+url.PathEscape(target)+"/mode", body, &out)
+}
+
 // Handover asks the daemon for the list of processes to pass on and to exit
 // without stopping them. The daemon is gone a moment after this returns.
 func (c *Client) Handover() ([]proc.HandoverEntry, error) {

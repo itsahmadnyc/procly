@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased (v0.5.0)
+
+Cluster mode, a password you can change, and a fuller server page.
+
+- **Cluster mode**: `exec_mode: cluster` (or `procly start app.js --exec-mode cluster -i 4`) runs a Node app as a master plus workers that share its ports (`node:cluster`, connections handed round-robin). `instances` is the worker count, 0 means one per CPU. procly supervises the master; CPU and memory are summed over the whole group; `procly reload` is a rolling reload (one worker at a time, no dropped connections).
+- **`procly mode <name> fork|cluster [-i n]`**: switch a running app between the two. It asks first, restarts the app, refuses without touching it when the app cannot run in that mode, and leaves a stopped app stopped. The panel gets the same through `POST /api/servers/<server>/processes/<name>/mode` (this server only).
+- **Password change**: `POST /api/password` in the panel (current password required).
+- **Server info**: CPU model, swap, addresses, Node version, user and timezone are reported by `sysinfo`.
+
 ## v0.4.7
 
 Which domain reaches an app.

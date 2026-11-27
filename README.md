@@ -310,6 +310,19 @@ Scrolling the logs redraws most of the screen (about 7 KB a frame), so `monit` s
 the screen lag behind your scrolling. `PROCLY_FPS=1..60` sets it. A key held down or a trackpad
 flick speeds up the longer it goes on, so it reaches its place in fewer frames.
 
+## Cluster mode
+
+Run a Node app as several workers sharing one port:
+
+```bash
+procly start server.js --exec-mode cluster -i 4   # 0 = one worker per CPU
+procly mode api cluster -i 4                      # switch a running app
+procly mode api fork                              # and back
+procly reload api                                 # rolling: one worker at a time
+```
+
+In `procly.yml`: `exec_mode: cluster` with `instances: 4`. procly supervises the master and counts the workers' CPU and memory together. Switching restarts the app, so it asks first (`-y` skips); if the app cannot run in the new mode it is left running as it was.
+
 ## Which domain reaches an app
 
 `procly domains` answers "is this app connected to a domain?". procly finds the TCP ports each

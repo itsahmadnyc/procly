@@ -195,6 +195,7 @@ func (s *server) routes() http.Handler {
 
 	mux.HandleFunc("POST /api/login", s.csrf(s.login))
 	mux.HandleFunc("POST /api/logout", s.csrf(s.logout))
+	mux.HandleFunc("POST /api/password", s.private(s.csrf(s.password)))
 	mux.HandleFunc("GET /api/info", s.private(s.info))
 	mux.HandleFunc("GET /api/servers", s.private(s.serverList))
 	mux.HandleFunc("GET /api/servers/{server}/processes", s.private(s.withBackend(s.list)))
@@ -204,6 +205,7 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("GET /api/servers/{server}/processes/{name}/logs", s.private(s.withBackend(s.logs)))
 	mux.HandleFunc("POST /api/servers/{server}/save", s.private(s.csrf(s.withBackend(s.save))))
 	mux.HandleFunc("POST /api/servers/{server}/processes", s.private(s.csrf(s.withBackend(s.start))))
+	mux.HandleFunc("POST /api/servers/{server}/processes/{name}/mode", s.private(s.csrf(s.withBackend(s.mode))))
 
 	return secureHeaders(mux)
 }
@@ -290,6 +292,43 @@ func secureRequest(r *http.Request) bool {
 	return r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
 }
 
+// password changes the panel password. It needs the current one, and wrong
+// guesses count against the same limit as logging in, so a stolen session
+// cannot be used to guess the password. Other sessions are ended.
+func (s *server) password(w http.ResponseWriter, r *http.Request) {
+	ip := s.clientIP(r)
+	if ok, wait := s.auth.allowLogin(ip); !ok {
+		w.Header().Set("Retry-After", fmt.Sprint(int(wait.Seconds())+1))
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": fmt.Sprintf("too many attempts, try again in %d minutes", int(wait.Minutes())+1)})
+		return
+	}
+	var body struct {
+		Current string `json:"current"`
+		Next    string `json:"next"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		return
+	}
+	keep := ""
+	if c, err := r.Cookie(cookieName); err == nil {
+		keep = c.Value
+	}
+	ended, err := s.auth.changePassword(body.Current, body.Next, keep)
+	switch {
+	case errors.Is(err, errWrongPassword):
+		s.auth.recordFailure(ip)
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": err.Error()})
+	case errors.Is(err, errWeakPassword), errors.Is(err, errLongPassword), errors.Is(err, errSamePassword):
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+	case err != nil:
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not save the new password: " + err.Error()})
+	default:
+		s.auth.clearFailures(ip)
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "signed_out": ended})
+	}
+}
+
 func (s *server) logout(w http.ResponseWriter, r *http.Request) {
 	if c, err := r.Cookie(cookieName); err == nil {
 		s.auth.endSession(c.Value)
@@ -347,6 +386,32 @@ func (s *server) start(w http.ResponseWriter, r *http.Request, b backend, server
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]string{"name": spec.Name})
+}
+
+// mode changes an app between fork (separate processes) and cluster (workers
+// sharing its ports). It restarts the app, so the panel asks first; this side
+// only checks the request is well formed.
+func (s *server) mode(w http.ResponseWriter, r *http.Request, b backend, server string) {
+	ms, ok := b.(modeSetter)
+	if !ok || server != remote.LocalName {
+		writeJSON(w, http.StatusForbidden, map[string]string{
+			"error": "the mode can only be changed on this server. Run procly mode on " + server + ".",
+		})
+		return
+	}
+	var req struct {
+		Mode      string `json:"mode"`
+		Instances int    `json:"instances"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&req); err != nil || (req.Mode != proc.ExecFork && req.Mode != proc.ExecCluster) || req.Instances < 0 || req.Instances > proc.MaxInstances {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "mode must be fork or cluster, and instances a number from 0 to " + fmt.Sprint(proc.MaxInstances)})
+		return
+	}
+	if err := ms.SetMode(r.Context(), r.PathValue("name"), req.Mode, req.Instances); err != nil {
+		writeError(w, server, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 type backendHandler func(w http.ResponseWriter, r *http.Request, b backend, server string)

@@ -38,6 +38,8 @@ Processes
   reload <name|id|all>          Send the reload signal (reload_signal), no restart
   delete <name|id|all>          Stop and forget processes          alias: rm
   list [--json]                 Show all processes                 alias: ls
+  mode <name> fork|cluster      Run an app as separate processes or as cluster workers
+                                (--instances <n|max>), keeping its settings
   describe <name|id> [--json]   Details for one process            alias: show
   domains [--json]              Which domain names reach each process (reads nginx,
                                 Caddy and Apache config; --refresh looks again)
@@ -83,6 +85,9 @@ Start options
       --reload-signal <sig>     Signal for procly reload, e.g. SIGHUP
       --max-memory <size>       Restart when the process and its children use more (e.g. 500MB)
       --instances <n>           Start n copies, named name-1 .. name-n (PROCLY_INSTANCE is 0..n-1)
+      --exec-mode cluster       One process with --instances workers (or max: one per core)
+                                that share the app's ports, like PM2's cluster mode; the app
+                                must be a Node script ("node server.js")
       --health <url>            http(s)://… or tcp://host:port; restart after 3 failed checks
       --log-max-size <size>     Rotate logs past this size (default 10MB, 0 = off)
       --log-keep <n>            Old log files to keep (default 3)
@@ -124,6 +129,8 @@ func Run(argv []string) int {
 		err = cmdList(rest)
 	case "describe", "show", "info":
 		err = cmdDescribe(rest)
+	case "mode":
+		err = cmdMode(rest)
 	case "domains", "domain":
 		err = cmdDomains(rest)
 	case "logs", "log":
@@ -235,7 +242,7 @@ func connectOrRecover() (*client.Client, bool) {
 
 func cmdStart(argv []string) error {
 	a, err := parse(argv, withServer(flagSet{
-		valued: set("name", "cwd", "env", "env-file", "max-restarts", "max-memory", "instances", "stop-signal", "reload-signal", "restart-every", "restart-at", "health", "log-max-size", "log-keep"),
+		valued: set("name", "cwd", "env", "env-file", "max-restarts", "max-memory", "instances", "exec-mode", "stop-signal", "reload-signal", "restart-every", "restart-at", "health", "log-max-size", "log-keep"),
 		bools:  set("no-autorestart"),
 		alias:  map[string]string{"n": "name", "e": "env"},
 	}))
@@ -409,10 +416,18 @@ func buildSpec(a args) (proc.Spec, error) {
 		}
 		spec.MaxRestarts = n
 	}
-	if v := a.get("instances"); v != "" {
+	if v := a.get("exec-mode"); v != "" {
+		if v != proc.ExecFork && v != proc.ExecCluster {
+			return spec, fmt.Errorf("--exec-mode must be %s or %s", proc.ExecFork, proc.ExecCluster)
+		}
+		spec.ExecMode = v
+	}
+	if v := a.get("instances"); v == "max" && spec.ExecMode == proc.ExecCluster {
+		spec.Instances = 0 // one worker per CPU core
+	} else if v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n < 1 || n > proc.MaxInstances {
-			return spec, fmt.Errorf("--instances must be a number from 1 to %d", proc.MaxInstances)
+			return spec, fmt.Errorf("--instances must be a number from 1 to %d (or max with --exec-mode cluster)", proc.MaxInstances)
 		}
 		spec.Instances = n
 	}
@@ -670,6 +685,9 @@ func cmdDescribe(argv []string) error {
 		[2]string{"restarts", fmt.Sprint(in.Restarts)},
 		[2]string{"autorestart", auto},
 	)
+	if in.Spec.ExecMode == proc.ExecCluster {
+		rows = append(rows, [2]string{"mode", fmt.Sprintf("cluster, %d %s sharing the app's ports (procly mode %s fork to separate them)", in.Spec.Workers(), plural(in.Spec.Workers(), "worker", "workers"), in.Name)})
+	}
 	if rep, err := c.Domains(false); err == nil {
 		rows = append(rows, domainRows(rep, in.Name)...)
 	}

@@ -29,7 +29,19 @@ type starter interface {
 	Start(ctx context.Context, spec proc.Spec) error
 }
 
+// modeSetter is a backend that can change how an app runs (fork or cluster).
+// Like starting, only the local one can: an agent only restarts, stops and
+// deletes what is already there.
+type modeSetter interface {
+	SetMode(ctx context.Context, name, mode string, instances int) error
+}
+
 type localBackend struct{ c *client.Client }
+
+func (l localBackend) SetMode(_ context.Context, name, mode string, instances int) error {
+	_, err := l.c.SetMode(name, mode, instances)
+	return err
+}
 
 func (l localBackend) Start(_ context.Context, spec proc.Spec) error {
 	_, err := l.c.Start(spec)

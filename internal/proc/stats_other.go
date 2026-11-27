@@ -59,3 +59,31 @@ func groupMemory(groups []int) map[int]int64 {
 	}
 	return out
 }
+
+// readGroupStats sums CPU and memory over every process in each process group.
+func readGroupStats(groups []int) map[int]procStat {
+	want := map[int]bool{}
+	for _, g := range groups {
+		want[g] = true
+	}
+	out := map[int]procStat{}
+	data, _ := exec.Command("ps", "-axo", "pgid=,%cpu=,rss=").Output()
+	sc := bufio.NewScanner(bytes.NewReader(data))
+	for sc.Scan() {
+		f := strings.Fields(sc.Text())
+		if len(f) != 3 {
+			continue
+		}
+		pgid, err1 := strconv.Atoi(f[0])
+		cpu, err2 := strconv.ParseFloat(f[1], 64)
+		rss, err3 := strconv.ParseInt(f[2], 10, 64)
+		if err1 != nil || err2 != nil || err3 != nil || !want[pgid] {
+			continue
+		}
+		g := out[pgid]
+		g.cpu += cpu
+		g.rss += rss * 1024
+		out[pgid] = g
+	}
+	return out
+}

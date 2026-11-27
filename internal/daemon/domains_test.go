@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -97,5 +99,38 @@ func TestDomainsRoute(t *testing.T) {
 	a.do("GET", "/v1/domains", "", &again)
 	if !again.ScannedAt.Equal(rep.ScannedAt) {
 		t.Error("an answer is kept for a few seconds")
+	}
+}
+
+func TestModeRoute(t *testing.T) {
+	a := newAPI(t)
+	a.start("tool", "sleep 30")
+	var e struct{ Error string }
+	if code := a.do("POST", "/v1/processes/tool/mode", `{"mode":"cluster","instances":2}`, &e); code != 400 || e.Error == "" {
+		t.Fatalf("a command that is not a node script cannot be clustered: %d %q", code, e.Error)
+	}
+	if code := a.do("POST", "/v1/processes/tool/mode", `{"mode":"turbo"}`, &e); code != 400 {
+		t.Fatalf("an unknown mode: %d", code)
+	}
+	if code := a.do("POST", "/v1/processes/tool/mode", `not json`, &e); code != 400 {
+		t.Fatalf("bad JSON: %d", code)
+	}
+	if code := a.do("POST", "/v1/processes/nope/mode", `{"mode":"cluster"}`, &e); code != 404 {
+		t.Fatalf("an unknown app: %d", code)
+	}
+	var in proc.Info
+	if code := a.do("GET", "/v1/processes/tool", "", &in); code != 200 || in.Status != proc.StatusOnline {
+		t.Fatalf("refused changes leave it running: %d %+v", code, in)
+	}
+	if _, err := exec.LookPath("node"); err != nil {
+		return
+	}
+	spec, _ := json.Marshal(proc.Spec{Name: "web", Command: "node -e 'setInterval(()=>{},1000)'", Cwd: t.TempDir()})
+	if code := a.do("POST", "/v1/processes", string(spec), nil); code != 201 {
+		t.Fatalf("start: %d", code)
+	}
+	// "node -e" is not a script file, so it cannot be a cluster either
+	if code := a.do("POST", "/v1/processes/web/mode", `{"mode":"cluster","instances":2}`, &e); code != 400 || !strings.Contains(e.Error, "script file") {
+		t.Fatalf("node -e: %d %q", code, e.Error)
 	}
 }

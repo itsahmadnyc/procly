@@ -11,6 +11,12 @@ func read(s *System) {
 		s.Distro = "macOS " + v
 	}
 	s.Kernel, _ = syscall.Sysctl("kern.osrelease")
+	s.CPUModel, _ = syscall.Sysctl("machdep.cpu.brand_string")
+	// struct xsw_usage { u_int64_t xsu_total, xsu_avail, xsu_used; ... }
+	if b := sysctlBytes("vm.swapusage"); len(b) >= 16 {
+		s.SwapTotal = binary.LittleEndian.Uint64(b[0:8])
+		s.SwapFree = binary.LittleEndian.Uint64(b[8:16])
+	}
 	if b := sysctlBytes("hw.memsize"); len(b) >= 8 {
 		s.MemTotal = binary.LittleEndian.Uint64(b)
 	}

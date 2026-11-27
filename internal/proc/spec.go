@@ -35,6 +35,13 @@ type Spec struct {
 	RestartEvery string `json:"restart_every,omitempty" yaml:"restart_every"`
 	RestartAt    string `json:"restart_at,omitempty" yaml:"restart_at"`
 
+	// ExecMode is how the app runs: "fork" (the default), one process or, with
+	// Instances, several separate ones, or "cluster": one launcher process whose
+	// workers run the app's Node script and share its ports (see cluster.go).
+	// In cluster mode Instances is the number of workers, and none means one
+	// per CPU core.
+	ExecMode string `json:"exec_mode,omitempty" yaml:"exec_mode"`
+
 	// Instances starts that many copies of the app, named name-1 .. name-N (see
 	// Expand). It is what a person writes; once expanded, each copy is its own
 	// spec with Group, Index and the total in Instances, which is what is saved.
@@ -156,6 +163,18 @@ func (s Spec) Validate() error {
 	}
 	if s.Group != "" && (s.Instances < 2 || s.Index < 0 || s.Index >= s.Instances) {
 		return fmt.Errorf("%s: an instance needs instances >= 2 and an index below it, got index %d of %d", s.Name, s.Index, s.Instances)
+	}
+	switch s.ExecMode {
+	case "", ExecFork:
+	case ExecCluster:
+		if s.Group != "" {
+			return fmt.Errorf("%s: cluster mode runs one process whose workers share the ports, not a group of instances", s.Name)
+		}
+		if _, err := parseClusterCommand(s.Command); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("exec_mode must be %q or %q, got %q", ExecFork, ExecCluster, s.ExecMode)
 	}
 	if err := s.validateSchedule(); err != nil {
 		return err
