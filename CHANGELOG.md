@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.5.1
+
+- **Sign-in page** now fills the whole window (illustration on the left, form on the right) instead of a centered card.
+
 ## v0.5.0
 
 Cluster mode, a password you can change, and a fuller server page.
