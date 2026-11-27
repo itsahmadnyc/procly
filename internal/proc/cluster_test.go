@@ -326,6 +326,21 @@ func TestSetModeBetweenForkAndCluster(t *testing.T) {
 		t.Fatalf("only the one process is left: %+v", list)
 	}
 
+	// cluster -> fork with no count is the app as it was: ONE process, never
+	// N copies that fight over the same port (this once left an app crashing)
+	infos, err = m.SetMode("web", ExecFork, 0)
+	if err != nil || len(infos) != 1 || infos[0].Spec.Name != "web" || infos[0].Spec.isCluster() || infos[0].Spec.Group != "" || infos[0].Spec.Instances > 1 {
+		t.Fatalf("cluster to fork: %+v %v", infos, err)
+	}
+	eventually(t, "one process on the port", answers(base, 1))
+	if list := m.List(); len(list) != 1 {
+		t.Fatalf("exactly one process after going back to fork: %+v", list)
+	}
+	if _, err := m.SetMode("web", ExecCluster, 3); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "three workers again", answers(base, 3))
+
 	// a refusal changes nothing
 	other, _ := m.Start(Spec{Name: "tool", Command: "sleep 30", Cwd: cwd})
 	if _, err := m.SetMode("tool", ExecCluster, 2); err == nil || !strings.Contains(err.Error(), "another program") {

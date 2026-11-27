@@ -12,8 +12,10 @@ import (
 //
 //   - cluster: one process with that many workers (workers 0 means one per
 //     CPU core). A group of instances becomes that one process.
-//   - fork with 1 worker or 0: one process. With more: that many separate
-//     instances, name-1 .. name-N.
+//   - fork with 1 worker or 0: one process, whatever it was before. Going back
+//     from cluster to fork must give the app back as it was, not N copies that
+//     fight over its port. With more than 1: that many separate instances,
+//     name-1 .. name-N, which is only right for an app that picks its own port.
 //
 // The old setup is stopped first and the new one started; if the new one
 // cannot start, the old one is put back. Nothing is changed when the new
@@ -73,8 +75,6 @@ func (m *Manager) SetMode(target, mode string, workers int) ([]Info, error) {
 		switch {
 		case workers > 1:
 			s.Instances = workers
-		case workers == 0 && first.isCluster() && first.Workers() > 1:
-			s.Instances = first.Workers() // the workers become instances
 		default:
 			s.Instances = 0
 		}
