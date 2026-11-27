@@ -175,7 +175,7 @@ func (m model) footerLine() string {
 	var hints []hint
 	switch {
 	case m.zoom:
-		hints = []hint{{"↑↓", "scroll"}, {"f", "follow"}, {"/", "search"}, {"e", "stream"}, {"w", "wrap"}, {"esc", "back"}}
+		hints = []hint{{"esc", "back"}, {"↑↓", "scroll"}, {"f", "follow"}, {"/", "search"}, {"e", "stream"}, {"w", "wrap"}}
 	case m.focus == paneLogs:
 		hints = []hint{{"↑↓", "scroll"}, {"f", "follow"}, {"/", "search"}, {"e", "stream"}, {"w", "wrap"}, {"c", "clear"}, {"tab", "processes"}, {"enter", "full screen"}}
 	default:
@@ -639,8 +639,8 @@ func (m model) detailLines(r row, cw, n int) []string {
 		return sMuted.Render("cpu ") + graph(m.cpu[key], sw, sGreen, true, 10) + " " + cpuNow,
 			sMuted.Render("mem ") + graph(m.mem[key], sw, memSpark, false, 8*mb) + " " + memNow
 	}
-	command := sMuted.Render("$ ") + first.Command
-	cwd := sMuted.Render("in ") + tilde(first.Cwd)
+	command := sMuted.Render("$ ") + safe(first.Command)
+	cwd := sMuted.Render("in ") + safe(tilde(first.Cwd))
 	settings := settingsLine(first)
 
 	if n <= 5 { // stacked layout: the essentials, two graphs on one line
@@ -664,7 +664,7 @@ func (m model) detailLines(r row, cw, n int) []string {
 		out = append(out, settings)
 	}
 	if r.v != nil && r.v.HealthError != "" && r.v.Health == proc.HealthUnhealthy {
-		out = append(out, sRed.Render("health: "+r.v.HealthError))
+		out = append(out, sRed.Render("health: "+safe(r.v.HealthError)))
 	}
 	if r.v == nil { // a group lists its members
 		out = append(out, "")
@@ -758,7 +758,7 @@ func eventLine(e proc.ViewEvent) string {
 		s += sMuted.Render(fmt.Sprintf(" exit %d", e.ExitCode))
 	}
 	if e.Detail != "" {
-		s += sMuted.Render(" " + e.Detail)
+		s += sMuted.Render(" " + safe(e.Detail))
 	}
 	return s
 }
@@ -820,11 +820,7 @@ func (m model) logLines(cw, n int) []string {
 			nameW = max(nameW, lipgloss.Width(s.name))
 		}
 	}
-	textW := cw - 2
-	if nameW > 0 {
-		textW -= nameW + 1
-	}
-	textW = max(textW, 1)
+	textW := m.logTextWidth(cw)
 
 	end := min(max(len(vis)-m.logOff, 0), len(vis))
 	var out []string
@@ -843,12 +839,7 @@ func (m model) logLines(cw, n int) []string {
 			prefix = lipgloss.NewStyle().Foreground(sourceColors[l.src%len(sourceColors)]).Render(fit(name, nameW)) + " "
 			blank = strings.Repeat(" ", nameW+1)
 		}
-		var segs []string
-		if m.nowrap || lipgloss.Width(l.text) <= textW {
-			segs = []string{ansi.Truncate(l.text, textW, "…")}
-		} else {
-			segs = strings.Split(ansi.Wrap(l.text, textW, ""), "\n")
-		}
+		segs := m.wrapLog(l.text, textW)
 		var block []string
 		for j, s := range segs {
 			p := prefix

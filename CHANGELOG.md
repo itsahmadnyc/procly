@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.4.3
+
+`procly monit`: scrolling up in the logs no longer breaks the screen.
+
+- **The bug**: scroll up in a log to a startup banner with emoji (`🚀`, `👨‍💻`, `⏱️`) and the header, the footer and the frames scrolled away or were drawn twice. Terminals disagree about how many cells some emoji take (`⏱️` is 1 or 2, a joined `👨‍💻` is 2 or 4), so a line that procly had cut to the terminal's width was wider in the terminal, wrapped, and every redraw after that was off by a line. It only showed when the old lines came into view; the end of the log was fine.
+- **The fix**: text from your apps (logs, command lines, error messages) is shown without emoji: each becomes a `·`, and one picture made of several (a family, a flag, a hand with a skin tone) becomes a single `·`. Plain symbols that every terminal draws one cell wide (`✓ ✗ → • ─ █`) are kept. Bells, backspaces and other control characters in a log line are dropped instead of being sent to the terminal. The apps' own logs are not changed, only what `monit` draws.
+- Scrolling up stops when the oldest line is at the top of the pane (it used to go on until one line was left on an empty pane), counting wrapped lines as the rows they take.
+- A process's stdout history is shown before its stderr history again, as in 0.4.0; 0.4.1 and 0.4.2 spread the few stderr lines through a long banner. A group's instances are still merged within each stream.
+- In full-screen logs, `esc back` is the first hint in the footer, so a narrow terminal does not drop it.
+
 ## v0.4.2
 
 Restarts that go one at a time now wait until each app serves again.

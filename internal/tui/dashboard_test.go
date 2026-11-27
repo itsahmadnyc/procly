@@ -206,8 +206,8 @@ func TestLogsPauseAndFollow(t *testing.T) {
 		t.Fatal("f follows again")
 	}
 	m, _ = send(m, tea.KeyMsg{Type: tea.KeyTab}, key("g"))
-	if m.logOff != len(m.logs)-1 {
-		t.Fatalf("g in the logs goes to the oldest line: %d", m.logOff)
+	if want := len(m.logs) - (m.layout().logs.h - 2); m.logOff != want {
+		t.Fatalf("g in the logs puts the oldest line at the top of a full pane: offset %d, want %d", m.logOff, want)
 	}
 	m, _ = send(m, key("G"))
 	if m.logOff != 0 {
