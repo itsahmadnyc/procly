@@ -141,15 +141,16 @@ type model struct {
 	input    inputMode
 	inputBuf string
 
-	zoom, help bool
-	confirm    string            // target waiting for delete confirmation
-	busy       map[string]string // target -> verb in progress
-	flash      string
-	flashErr   bool
-	flashAt    time.Time
-	host       hostStats
-	doms       domains.Report // which names reach which process, as the daemon last found
-	domsOK     bool           // doms holds an answer
+	zoom, help  bool
+	confirm     string            // target waiting for a yes
+	confirmVerb string            // what the yes does: restart, stop, delete, cluster or fork
+	busy        map[string]string // target -> verb in progress
+	flash       string
+	flashErr    bool
+	flashAt     time.Time
+	host        hostStats
+	doms        domains.Report // which names reach which process, as the daemon last found
+	domsOK      bool           // doms holds an answer
 
 	lastScroll time.Time // when the last scroll step came, for speeding up
 	streak     int       // scroll steps in a row, each within scrollGap of the one before
@@ -245,8 +246,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-var pastTense = map[string]string{"restart": "restarted", "reload": "reloaded", "start": "started", "stop": "stopped", "delete": "deleted"}
-var progressive = map[string]string{"restart": "restarting", "reload": "reloading", "start": "starting", "stop": "stopping", "delete": "deleting"}
+var pastTense = map[string]string{"restart": "restarted", "reload": "reloaded", "start": "started", "stop": "stopped", "delete": "deleted", "cluster": "now runs in cluster mode:", "fork": "now runs in fork mode:"}
+var progressive = map[string]string{"restart": "restarting", "reload": "reloading", "start": "starting", "stop": "stopping", "delete": "deleting", "cluster": "switching to cluster", "fork": "switching to fork"}
 
 func (m *model) say(s string, isErr bool) { m.flash, m.flashErr, m.flashAt = s, isErr, time.Now() }
 
@@ -389,12 +390,12 @@ func (m model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	}
 	if m.confirm != "" {
-		target := m.confirm
-		m.confirm = ""
+		target, verb := m.confirm, m.confirmVerb
+		m.confirm, m.confirmVerb = "", ""
 		if s == "y" || s == "Y" {
-			return m, m.act("delete", target)
+			return m, m.act(verb, target)
 		}
-		m.say("delete cancelled", false)
+		m.say(verb+" cancelled", false)
 		return m, nil
 	}
 	if m.help {
@@ -526,7 +527,15 @@ func (m model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.follow()
 	case "r":
 		if haveRow {
-			return m, m.act("restart", r.target())
+			m.confirm, m.confirmVerb = r.target(), "restart"
+		}
+	case "m":
+		if haveRow {
+			to := "cluster"
+			if r.views()[0].ExecMode == "cluster" {
+				to = "fork"
+			}
+			m.confirm, m.confirmVerb = r.target(), to
 		}
 	case "R":
 		if haveRow {
@@ -540,14 +549,15 @@ func (m model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if haveRow {
 			for _, v := range r.views() {
 				if v.Status == proc.StatusOnline || v.Status == proc.StatusWaiting || v.Status == proc.StatusOrphaned {
-					return m, m.act("stop", r.target())
+					m.confirm, m.confirmVerb = r.target(), "stop"
+					return m, nil
 				}
 			}
 			return m, m.act("start", r.target())
 		}
 	case "d", "x", "delete":
 		if haveRow {
-			m.confirm = r.target()
+			m.confirm, m.confirmVerb = r.target(), "delete"
 		}
 	}
 	return m, nil
@@ -655,6 +665,8 @@ func (m model) act(verb, target string) tea.Cmd {
 			_, err = c.Stop(target)
 		case "delete":
 			_, err = c.Delete(target)
+		case "cluster", "fork":
+			_, err = c.SetMode(target, verb, 0)
 		}
 		return actionMsg{verb, target, err}
 	}

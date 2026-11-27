@@ -68,7 +68,11 @@ func TestGroupsShowTogetherAndFold(t *testing.T) {
 	}
 
 	// Actions on the group's line go to the base name, which means all of them.
-	m, cmd := send(m, key("r"))
+	m, _ = send(m, key("r"))
+	if m.confirm != "queue" || m.confirmVerb != "restart" || !strings.Contains(m.View(), "restart all") {
+		t.Fatalf("r should ask first: %q %q", m.confirm, m.confirmVerb)
+	}
+	m, cmd := send(m, key("y"))
 	if cmd == nil || m.busy["queue"] != "restart" {
 		t.Fatalf("restart on a group: %v", m.busy)
 	}
