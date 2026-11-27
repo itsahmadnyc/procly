@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.5.3
+
+- **Overview polish**: icons on every KPI card (tinted by state), on section headings and on each activity entry; the resource chart now fills its whole width from the first samples, in green, with the current and peak value in its title and the scale in the corner.
+
 ## v0.5.2
 
 - **Mode where you can see it**: the New process dialog has Mode (fork or cluster) and Workers/Copies, and a process page has a Fork/Cluster button in its header that opens the switch dialog. Starting a process from the panel can now run it as a cluster.
