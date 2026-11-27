@@ -445,7 +445,7 @@ a.list-item:hover { background: var(--hover); }
 
 /* activity: a log, not a feed of tiles */
 .act { display: flex; flex-direction: column; }
-.act-item { display: grid; grid-template-columns: 56px 22px minmax(0, 1fr); align-items: baseline; gap: 10px; padding: 7px 14px; border-top: 1px solid var(--hair); font-size: 13px; transition: background-color 0.12s; }
+.act-item { display: grid; grid-template-columns: 56px 8px minmax(0, 1fr); align-items: baseline; gap: 10px; padding: 7px 14px; border-top: 1px solid var(--hair); font-size: 13px; transition: background-color 0.12s; }
 .act-item:first-child { border-top: 0; }
 a.act-item:hover { background: var(--hover); }
 .act-when { font-size: 12px; color: var(--faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -862,21 +862,11 @@ a.act-item:hover { background: var(--hover); }
 @media (prefers-reduced-motion: reduce) { .page, .empty-art .ea-dot, .skel-card, .skel-line { animation: none; } .theme-tile { transition: none; } }
 .mode-fact { display: inline-flex; align-items: center; gap: 10px; }
 
-/* ---------- polish: icons on cards, sections and activity ---------- */
+/* ---------- polish: the fleet chart ---------- */
 
-.kpi-top { justify-content: flex-start; }
-.kpi-top .chip { margin-left: auto; }
-.kpi-ico { display: inline-grid; place-items: center; width: 30px; height: 30px; border-radius: 9px; background: var(--raised); color: var(--muted); }
-.kpi-ico.good { background: var(--green-soft); color: var(--green); }
-.kpi-ico.warn { background: var(--amber-soft); color: var(--amber); }
-.kpi-ico.bad { background: var(--red-soft); color: var(--red); }
-.kpi-name { font-weight: 500; color: var(--text); }
+.kpi-top { justify-content: space-between; }
 .kpi-card:hover { border-color: var(--border-strong); }
-.sec-ico { display: inline-grid; place-items: center; align-self: center; width: 22px; height: 22px; border-radius: 6px; background: var(--raised); color: var(--muted); }
-.act-ico { display: inline-grid; place-items: center; align-self: center; width: 22px; height: 22px; border-radius: 50%; background: var(--raised); color: var(--muted); }
-.act-ico.good { background: var(--green-soft); color: var(--green); }
-.act-ico.warn { background: var(--amber-soft); color: var(--amber); }
-.act-ico.bad { background: var(--red-soft); color: var(--red); }
+.act-item { grid-template-columns: 56px 8px minmax(0, 1fr); }
 .chart.fleet .line { stroke: var(--green-mark); stroke-width: 2; }
 .chart.fleet .area { fill: var(--green-soft); }
 .fleet-max { position: absolute; left: 16px; top: 14px; font-size: 11.5px; color: var(--faint); font-variant-numeric: tabular-nums; }
