@@ -203,6 +203,10 @@ func (d listRow) cells(withHealth bool) []string {
 }
 
 func printList(w io.Writer, infos []proc.View, server string) {
+	if cols, ok := richWidth(w); ok && len(infos) > 0 {
+		printRichList(w, infos, server, cols)
+		return
+	}
 	if len(infos) == 0 {
 		if server != "" {
 			fmt.Fprintln(w, dim("  No processes on "+server+"."))
