@@ -871,3 +871,29 @@ a.act-item:hover { background: var(--hover); }
 .chart.fleet .area { fill: var(--green-soft); }
 .fleet-max { position: absolute; left: 16px; top: 14px; font-size: 11.5px; color: var(--faint); font-variant-numeric: tabular-nums; }
 .fleet-axis { margin-top: 6px; }
+
+/* ---------- processes page ---------- */
+
+.pstrip { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); margin-bottom: 16px; background: var(--pane); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+.pcell { display: flex; flex-direction: column; gap: 1px; padding: 12px 18px; border-left: 1px solid var(--hair); min-width: 0; }
+.pcell:first-child { border-left: 0; }
+.plabel { font-size: 12px; color: var(--muted); }
+.pcell b { font-size: 22px; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; line-height: 1.25; }
+.pcell b.good { color: var(--green); } .pcell b.bad { color: var(--red); }
+.psub { font-size: 12px; color: var(--faint); }
+.toolbar .sort { height: 30px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--pane); color: var(--text); font: 12.5px var(--sans); }
+#view .table tbody td { height: 58px; }
+.cell-name.two { display: block; }
+.cell-name.two .name-line { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.cell-name.two .cmd { display: block; margin-top: 2px; font: 12px var(--mono); color: var(--faint); overflow: hidden; text-overflow: ellipsis; }
+.tag { padding: 1px 7px; border-radius: 99px; font: 500 11px var(--sans) !important; background: var(--raised); color: var(--muted) !important; flex-shrink: 0; }
+#view .table .status { padding: 3px 10px 3px 9px; border-radius: 99px; background: var(--raised); }
+#view .table .status.online { background: var(--green-soft); }
+#view .table .status.waiting, #view .table .status.orphaned, #view .table .status.waiting-static { background: var(--amber-soft); }
+#view .table .status.errored { background: var(--red-soft); }
+.mbar { width: 64px; height: 5px; }
+.cell-meter > span:first-child { min-width: 54px; }
+#view .table .cell-actions .icon-btn { width: 30px; height: 30px; color: var(--muted); }
+#view .table .cell-actions .icon-btn:hover { background: var(--active); color: var(--text); }
+#view .table .hide-sm.icon-btn, .cell-actions .icon-btn { opacity: 1; visibility: visible; }
+@media (max-width: 900px) { .pstrip { grid-template-columns: repeat(2, minmax(0, 1fr)); } .pcell:nth-child(odd) { border-left: 0; } .pcell:nth-child(n+3) { border-top: 1px solid var(--hair); } }
