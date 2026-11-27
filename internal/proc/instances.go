@@ -17,6 +17,12 @@ func Expand(s Spec) ([]Spec, error) {
 	if s.Instances < 0 || s.Instances > MaxInstances {
 		return nil, fmt.Errorf("%s: instances must be between 1 and %d, got %d", s.Name, MaxInstances, s.Instances)
 	}
+	if s.isCluster() { // its instances are workers inside one process, not copies
+		if err := s.Validate(); err != nil {
+			return nil, err
+		}
+		return []Spec{s}, nil
+	}
 	if s.Instances <= 1 || s.Group != "" {
 		if s.Instances == 1 {
 			s.Instances = 0

@@ -179,6 +179,18 @@ func newHandler(m *proc.Manager, shutdown, detach func()) http.Handler {
 		infos, err := m.Reload(r.PathValue("name"))
 		respond(w, infos, err)
 	})
+	mux.HandleFunc("POST /v1/processes/{name}/mode", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Mode      string `json:"mode"`
+			Instances int    `json:"instances"`
+		}
+		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
+			writeError(w, fmt.Errorf("invalid request: %w", err))
+			return
+		}
+		infos, err := m.SetMode(r.PathValue("name"), req.Mode, req.Instances)
+		respond(w, infos, err)
+	})
 	mux.HandleFunc("DELETE /v1/processes/{name}", func(w http.ResponseWriter, r *http.Request) {
 		infos, err := m.Delete(r.PathValue("name"))
 		respond(w, infos, err)

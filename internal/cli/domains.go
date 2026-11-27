@@ -2,13 +2,18 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
+	xterm "github.com/charmbracelet/x/term"
+
 	"github.com/itsahmadnyc/procly/internal/domains"
+	"github.com/itsahmadnyc/procly/internal/proc"
 )
 
 func cmdDomains(argv []string) error {
@@ -171,4 +176,76 @@ func domainRows(rep domains.Report, name string) [][2]string {
 		return rows
 	}
 	return nil
+}
+
+func cmdMode(argv []string) error {
+	a, err := parse(argv, flagSet{valued: set("instances"), bools: set("yes", "y"), alias: map[string]string{"i": "instances", "y": "yes"}})
+	if err != nil {
+		return err
+	}
+	if len(a.pos) != 2 || (a.pos[1] != proc.ExecFork && a.pos[1] != proc.ExecCluster) {
+		return errors.New("usage: procly mode <name> fork|cluster [--instances <n|max>] [--yes]")
+	}
+	n := 0
+	if v := a.get("instances"); v == "max" {
+		n = 0
+	} else if v != "" {
+		if n, err = strconv.Atoi(v); err != nil || n < 1 || n > proc.MaxInstances {
+			return fmt.Errorf("--instances must be a number from 1 to %d, or max", proc.MaxInstances)
+		}
+	}
+	c, ok := connectOrRecover()
+	if !ok {
+		return errors.New("daemon is not running")
+	}
+	cur, err := c.Get(a.pos[0])
+	if err != nil {
+		// a group's base name: look it up in the list
+		list, lerr := c.List()
+		if lerr != nil {
+			return err
+		}
+		found := false
+		for _, in := range list {
+			if in.Spec.Group == a.pos[0] {
+				cur, found = in, true
+				break
+			}
+		}
+		if !found {
+			return err
+		}
+	}
+	what := "one process"
+	if cur.Spec.Group != "" {
+		what = fmt.Sprintf("%d separate processes", cur.Spec.Instances)
+	} else if cur.Spec.ExecMode == proc.ExecCluster {
+		what = fmt.Sprintf("a cluster of %d %s", cur.Spec.Workers(), plural(cur.Spec.Workers(), "worker", "workers"))
+	}
+	fmt.Printf("  %s runs as %s. Switching it to %s restarts it (it is stopped, then started again).\n", bold(a.pos[0]), what, a.pos[1])
+	if !a.bools["yes"] && !confirmTerminal("  Go on?") {
+		fmt.Println(dim("  Nothing changed."))
+		return nil
+	}
+	infos, err := c.SetMode(a.pos[0], a.pos[1], n)
+	if err != nil {
+		return err
+	}
+	printList(os.Stdout, proc.NewViews(infos), "")
+	fmt.Println(dim("  procly save keeps this after a reboot."))
+	return nil
+}
+
+// confirmTerminal asks a yes or no question on a terminal. Anything but y or
+// yes is a no, and so is input that is not a terminal.
+func confirmTerminal(q string) bool {
+	if !xterm.IsTerminal(os.Stdin.Fd()) {
+		fmt.Println(dim("  (not a terminal: pass --yes to go on without asking)"))
+		return false
+	}
+	fmt.Printf("%s [y/N] ", q)
+	var ans string
+	fmt.Scanln(&ans)
+	ans = strings.ToLower(strings.TrimSpace(ans))
+	return ans == "y" || ans == "yes"
 }

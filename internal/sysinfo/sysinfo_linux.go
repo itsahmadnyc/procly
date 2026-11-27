@@ -34,6 +34,20 @@ func read(s *System) {
 				s.MemTotal = kb * 1024
 			case "MemAvailable":
 				s.MemAvailable = kb * 1024
+			case "SwapTotal":
+				s.SwapTotal = kb * 1024
+			case "SwapFree":
+				s.SwapFree = kb * 1024
+			}
+		}
+		f.Close()
+	}
+	if f, err := os.Open("/proc/cpuinfo"); err == nil {
+		sc := bufio.NewScanner(f)
+		for sc.Scan() {
+			if k, v, ok := strings.Cut(sc.Text(), ":"); ok && strings.TrimSpace(k) == "model name" {
+				s.CPUModel = strings.Join(strings.Fields(v), " ")
+				break
 			}
 		}
 		f.Close()

@@ -61,6 +61,9 @@ func (s Spec) stopSignal() syscall.Signal {
 // reloadSignal is the signal for `procly reload`, and whether one is set.
 func (s Spec) reloadSignal() (syscall.Signal, bool) {
 	if s.ReloadSignal == "" {
+		if s.isCluster() {
+			return syscall.SIGUSR2, true // the launcher replaces its workers one at a time
+		}
 		return 0, false
 	}
 	sig, err := ParseSignal(s.ReloadSignal)

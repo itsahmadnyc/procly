@@ -75,6 +75,7 @@ type Process struct {
 	stopping    bool
 	exited      chan struct{} // closed when the current run exits
 	timer       *time.Timer   // pending auto-restart
+	logDir      string        // where the logs are, and the cluster launcher
 	outLog      string
 	errLog      string
 	errStart    int64 // size of errLog when the current run started
@@ -96,6 +97,7 @@ func newProcess(id int, spec Spec, logDir string, logger *log.Logger, events fun
 		id:     id,
 		spec:   spec,
 		status: StatusStopped,
+		logDir: logDir,
 		outLog: filepath.Join(logDir, spec.Name+"-out.log"),
 		errLog: filepath.Join(logDir, spec.Name+"-error.log"),
 		logger: logger,
@@ -143,7 +145,14 @@ func (p *Process) launchLocked() error {
 	}
 	p.envFileKeys = fileKeys
 
-	cmd := exec.Command("/bin/sh", "-c", shellCommand(p.spec.Command))
+	command, err := launchCommand(p.spec, p.logDir)
+	if err != nil {
+		fmt.Fprintf(errf, "[procly] failed to start: %v\n", err)
+		p.status = StatusErrored
+		p.noteLocked(EventErrored, 0, "failed to start: "+err.Error())
+		return fmt.Errorf("start %s: %w", p.spec.Name, err)
+	}
+	cmd := exec.Command("/bin/sh", "-c", command)
 	cmd.Dir = p.spec.Cwd
 	cmd.Env = buildEnv(fileEnv, p.spec.Env, p.id, p.spec.Name, p.spec.Group != "", p.spec.Index, p.spec.Instances)
 	cmd.Stdout = out

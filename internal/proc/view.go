@@ -33,6 +33,8 @@ type View struct {
 	Group          string `json:"group,omitempty"`     // base name when this is one of several instances
 	Index          int    `json:"index,omitempty"`     // its place in the group, from 0
 	Instances      int    `json:"instances,omitempty"` // how many there are in the group
+	ExecMode       string `json:"exec_mode,omitempty"` // "fork" or "cluster"
+	Workers        int    `json:"workers,omitempty"`   // in cluster mode, how many
 	RestartEvery   string `json:"restart_every,omitempty"`
 	RestartAt      string `json:"restart_at,omitempty"`
 	StopSignal     string `json:"stop_signal,omitempty"`   // as configured, empty for SIGTERM
@@ -74,8 +76,15 @@ func NewView(in Info) View {
 	if in.Spec.Group != "" {
 		v.Instances = in.Spec.Instances
 	}
+	v.ExecMode = in.Spec.ExecMode
+	if in.Spec.isCluster() {
+		v.Workers = in.Spec.Workers()
+	}
 	v.RestartEvery, v.RestartAt = in.Spec.RestartEvery, in.Spec.RestartAt
 	v.StopSignal, v.ReloadSignal = SignalName(in.Spec.StopSignal), SignalName(in.Spec.ReloadSignal)
+	if v.ReloadSignal == "" && in.Spec.isCluster() {
+		v.ReloadSignal = "SIGUSR2" // the launcher's rolling reload
+	}
 	v.MaxMemory, _ = in.Spec.maxMemoryBytes()
 	v.LogMaxBytes, v.LogKeep = in.Spec.logLimits()
 	v.OutLog, v.ErrLog = in.OutLog, in.ErrLog

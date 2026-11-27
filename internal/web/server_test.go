@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/itsahmadnyc/procly/internal/domains"
 	"io"
 	"net/http"
@@ -63,6 +64,13 @@ func (f *fakeBackend) Logs(ctx context.Context, name string, send func([]logtail
 		return nil
 	}
 	send([]logtail.Event{{Stream: "o", Line: "GET / 200"}})
+	return nil
+}
+
+func (f *fakeBackend) SetMode(_ context.Context, name, mode string, instances int) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.actions = append(f.actions, fmt.Sprintf("mode %s %s %d", name, mode, instances))
 	return nil
 }
 
