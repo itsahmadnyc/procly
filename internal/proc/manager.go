@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"sync"
+	"time"
 )
 
 var ErrNotFound = errors.New("process not found")
@@ -215,7 +216,16 @@ func (m *Manager) Restart(target string) ([]Info, error) {
 		return nil, err
 	}
 	if isGroup(target, ps) {
-		return infosOf(ps), inOrder(ps, (*Process).Restart) // one at a time: the others keep serving
+		// One at a time, and each must listen on its ports again before the
+		// next goes down, so the others keep serving. The waits share a
+		// budget that keeps the whole request well inside the client's
+		// timeout; once it is spent the rest still go one at a time.
+		budget := groupWaitBudget
+		return infosOf(ps), inOrder(ps, func(p *Process) error {
+			waited, err := p.restartWaiting(min(budget, instanceWait))
+			budget -= waited
+			return err
+		})
 	}
 	err = each(ps, (*Process).Restart)
 	return infosOf(ps), err
@@ -347,6 +357,14 @@ func isGroup(target string, ps []*Process) bool {
 	defer ps[0].mu.Unlock()
 	return ps[0].spec.Group == target
 }
+
+// instanceWait is the longest a rolling restart waits for one instance to
+// listen again; groupWaitBudget is the most it waits in all, which leaves
+// room for the stops inside the 90 s a remote panel waits for an answer.
+var (
+	instanceWait    = 30 * time.Second
+	groupWaitBudget = 60 * time.Second
+)
 
 // inOrder runs fn on each process in turn and gathers the errors; a restart
 // that goes one by one never takes every instance down at once.

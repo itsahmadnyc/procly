@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.4.2
+
+Restarts that go one at a time now wait until each app serves again.
+
+- `procly upgrade` and a group restart (`procly restart <group>`) used to move on as soon as an app's process was running. A server that needs a few seconds to boot was then still down when the next one went down too: upgrading three Node apps took all three down at the same time for about five seconds. Now, on Linux, procly notes the TCP ports the app's processes listen on before stopping it (from `/proc`, nothing to configure) and waits until the new process accepts connections on them before it touches the next app. `procly upgrade` says how long that took (`restarted api (serving on :3000 after 2.4s)`). Waits are capped: a minute per app for an upgrade, and for a group restart 30 seconds per instance and 60 in all. An app that listens on nothing, or one on macOS, is waited for as before (running, and healthy when it has a health check).
+
 ## v0.4.1
 
 A new `procly monit`.

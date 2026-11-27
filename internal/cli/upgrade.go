@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/netip"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -318,6 +319,12 @@ func finishHandover(c *client.Client, entries []proc.HandoverEntry) error {
 			fmt.Printf("  %s %s %s\n", dim("already running"), bold(name), dim("(done earlier)"))
 			continue
 		}
+		// The ports the old process serves on, so the next app waits until
+		// the new one serves on them too (Linux; nothing elsewhere).
+		var ports []netip.AddrPort
+		if exists && cur.PID > 0 {
+			ports = proc.ListeningPorts(cur.PID)
+		}
 		if exists {
 			if _, err := c.Stop(name); err != nil {
 				errs = append(errs, fmt.Errorf("stopping %s: %w", name, err))
@@ -328,7 +335,7 @@ func finishHandover(c *client.Client, entries []proc.HandoverEntry) error {
 			errs = append(errs, fmt.Errorf("starting %s: %w", name, err))
 			continue
 		}
-		note := waitReady(c, e.Spec)
+		note := waitReady(c, e.Spec, ports)
 		fmt.Printf("  %s %s%s\n", green("restarted"), bold(name), note)
 	}
 	if len(errs) > 0 {
@@ -339,25 +346,56 @@ func finishHandover(c *client.Client, entries []proc.HandoverEntry) error {
 	return nil
 }
 
-// waitReady gives a restarted app a moment to come up, and if it has a health
-// check, to pass it, before the next one is touched. It never blocks for long.
-func waitReady(c *client.Client, spec proc.Spec) string {
+// waitReady gives a restarted app time to come up before the next one is
+// touched: until it is online, healthy when it has a health check, and
+// listening again on the ports the old process listened on. It never blocks
+// for long.
+func waitReady(c *client.Client, spec proc.Spec, ports []netip.AddrPort) string {
 	limit := 5 * time.Second
-	if spec.Health != "" {
+	if spec.Health != "" || len(ports) > 0 {
 		limit = 60 * time.Second
 	}
-	deadline := time.Now().Add(limit)
+	start := time.Now()
+	deadline := start.Add(limit)
+	up := false
 	for time.Now().Before(deadline) {
 		in, err := c.Get(spec.Name)
 		if err == nil && in.Status == proc.StatusOnline && (spec.Health == "" || in.Health == proc.HealthHealthy) {
-			return ""
+			up = true
+			break
 		}
 		if err == nil && in.Status == proc.StatusErrored {
 			return " " + yellow("(errored; see procly logs "+spec.Name+")")
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
-	return " " + yellow("(not ready after "+limit.String()+"; carrying on)")
+	if !up {
+		return " " + yellow("(not ready after "+limit.String()+"; carrying on)")
+	}
+	if len(ports) == 0 {
+		return ""
+	}
+	online := func() bool {
+		in, err := c.Get(spec.Name)
+		return err == nil && in.Status == proc.StatusOnline
+	}
+	if !proc.WaitListening(ports, time.Until(deadline), online) {
+		return " " + yellow("(not listening on "+portList(ports)+" after "+time.Since(start).Round(time.Second).String()+"; carrying on)")
+	}
+	return " " + dim(fmt.Sprintf("(serving on %s after %.1fs)", portList(ports), time.Since(start).Seconds()))
+}
+
+// portList is ":5725" or ":5725, 127.0.0.1:9229".
+func portList(ports []netip.AddrPort) string {
+	parts := make([]string, len(ports))
+	for i, p := range ports {
+		if p.Addr().IsUnspecified() {
+			parts[i] = fmt.Sprintf(":%d", p.Port())
+		} else {
+			parts[i] = p.String()
+		}
+	}
+	return strings.Join(parts, ", ")
 }
 
 func waitGone(c *client.Client, within time.Duration) bool {

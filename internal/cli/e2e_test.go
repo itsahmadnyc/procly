@@ -31,6 +31,9 @@ import (
 var binary string
 
 func TestMain(m *testing.M) {
+	if os.Getenv("PROCLY_TEST_PORT") != "" { // the test binary run as an app (TestHelperSlowServer): no build
+		os.Exit(m.Run())
+	}
 	dir, err := os.MkdirTemp("", "procly-e2e-")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
