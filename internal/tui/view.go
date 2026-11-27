@@ -889,8 +889,7 @@ func (m model) helpView() string {
 		rows  [][2]string
 	}{
 		{"Processes", [][2]string{
-			{"↑ ↓  k j", "move; with the mouse, click a row"},
-			{"g G", "first / last"},
+			{"↑ ↓  k j  g G", "move, first / last; click a row with the mouse"},
 			{"← →  h l", "fold / unfold a group of instances (space toggles)"},
 			{"/", "filter by name, esc clears"},
 			{"o", "sort by id, name, cpu, memory, restarts"},
