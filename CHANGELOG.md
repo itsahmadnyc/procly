@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.5.5
+
+Cluster mode, the way PM2 handles it, and safer.
+
+- **Workers start one at a time**, each knowing its number in `NODE_APP_INSTANCE`, so boot-time work (database sync) does not run N times at once and can be limited to worker 0. `listen_timeout_ms` says how long a worker may take to listen.
+- **`max_memory` is per worker** in cluster mode, enforced by the launcher: an over-limit worker is replaced without a gap (before, the whole group was counted against one limit, which could loop). A limit that is too low makes procly give up, not loop.
+- **A switch is watched.** `procly mode` (and the panel and `m` in `monit`) waits for the new setup to prove itself and puts the old one back, with the reason, if workers crash after starting. It also waits for the old setup's ports to be free before starting the new one. This is the fix for the auclux incident.
+- **`procly scale <name> <n|+n|-n>`** adds or removes workers while the others keep serving; the panel has +/- on the Workers card.
+- **Workers are visible**: pid, state, memory and replacements per worker, in the panel (Workers card), `procly monit` and the status the launcher keeps.
+- **Warnings before switching**: the source is read for schema syncs, migrations, scheduled jobs, websockets and in-memory sessions; shown in `procly mode`, `procly start --exec-mode cluster` and the panel dialog.
+- **Separate copies and fixed ports**: `--instances N` without cluster refuses when every copy would get the same `PORT`; `--increment-var PORT` gives each its own (PM2's `increment_var`).
+- Stopping a cluster app signals its launcher, which stops the workers one by one (with 12 s to do it), instead of killing the whole group at once.
+
 ## v0.5.4
 
 Going back from cluster to fork.

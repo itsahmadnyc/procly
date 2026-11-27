@@ -312,16 +312,27 @@ flick speeds up the longer it goes on, so it reaches its place in fewer frames.
 
 ## Cluster mode
 
-Run a Node app as several workers sharing one port:
+Run a Node app as several workers sharing one port, like PM2's cluster mode:
 
 ```bash
-procly start server.js --exec-mode cluster -i 4   # 0 = one worker per CPU
+procly start server.js --exec-mode cluster -i 4   # 0 or max = one worker per CPU
 procly mode api cluster -i 4                      # switch a running app
-procly mode api fork                              # and back
-procly reload api                                 # rolling: one worker at a time
+procly mode api fork                              # and back: one process, as it was
+procly scale api +2                               # add two workers, nothing restarts
+procly scale api 3                                # or set the number
+procly reload api                                 # rolling: one worker at a time, no gap
 ```
 
-In `procly.yml`: `exec_mode: cluster` with `instances: 4`. procly supervises the master and counts the workers' CPU and memory together. Switching restarts the app, so it asks first (`-y` skips); if the app cannot run in the new mode it is left running as it was.
+In `procly.yml`: `exec_mode: cluster`, `instances: 4`, and optionally `listen_timeout_ms` (how long a worker may take to start listening, default 15000).
+
+What procly does for you, and what it leaves to the app:
+
+- **Workers start one at a time.** The next one starts when the previous is listening (or sent `process.send('ready')`, or the listen timeout passed), so an app that syncs its database before it listens does not do it N times at once. Each worker has `NODE_APP_INSTANCE` (also `PROCLY_INSTANCE`) set to its number, so start-up work can be done by worker 0 only: `if (process.env.NODE_APP_INSTANCE === '0') { ... }`.
+- **`max_memory` is per worker.** A worker over it is replaced without a gap; an app that is over it again and again makes procly give up instead of looping.
+- **A switch is checked.** After `procly mode`, procly watches the new setup until every worker is up and nothing has died for a few seconds. If it crashes, the old setup is put back and you are told why. Switching asks first (`-y` skips), and the ports the old setup held are free before the new one starts.
+- **Warnings before you switch.** procly reads the app's source for what goes wrong with several workers: schema syncs and migrations at boot, scheduled jobs, websockets, in-memory sessions. They are hints, never a refusal.
+- **Separate copies need their own port.** `--instances 3` without `--exec-mode cluster` starts three separate processes. If the app is given a fixed `PORT`, procly refuses (they would fight over it) unless you add `--increment-var PORT` (3000, 3001, 3002) or the app reads its own instance number.
+- **What stays with the app:** state kept in memory (sessions, caches, websocket rooms) is per worker. Connections are handed to workers in turn, so use a shared store (Redis) or keep that part in a single fork process. procly does not add sticky sessions.
 
 ## Which domain reaches an app
 

@@ -39,6 +39,7 @@ Processes
   delete <name|id|all>          Stop and forget processes          alias: rm
   list [--json]                 Show all processes                 alias: ls
   mode <name> fork|cluster      Run an app as separate processes or as cluster workers
+  scale <name> <n|+n|-n>        Change a cluster app's workers without restarting it
                                 (--instances <n|max>), keeping its settings
   describe <name|id> [--json]   Details for one process            alias: show
   domains [--json]              Which domain names reach each process (reads nginx,
@@ -85,6 +86,8 @@ Start options
       --reload-signal <sig>     Signal for procly reload, e.g. SIGHUP
       --max-memory <size>       Restart when the process and its children use more (e.g. 500MB)
       --instances <n>           Start n copies, named name-1 .. name-n (PROCLY_INSTANCE is 0..n-1)
+      --increment-var <NAME>    Raise this env var by each copy's number (PORT=3000 gives 3000, 3001, ...)
+      --listen-timeout <dur>    Cluster: how long a worker may take to start listening (default 15s)
       --exec-mode cluster       One process with --instances workers (or max: one per core)
                                 that share the app's ports, like PM2's cluster mode; the app
                                 must be a Node script ("node server.js")
@@ -133,6 +136,8 @@ func Run(argv []string) int {
 		err = cmdMode(rest)
 	case "domains", "domain":
 		err = cmdDomains(rest)
+	case "scale":
+		err = cmdScale(rest)
 	case "logs", "log":
 		err = cmdLogs(rest)
 	case "monit", "dash", "top":
@@ -242,7 +247,7 @@ func connectOrRecover() (*client.Client, bool) {
 
 func cmdStart(argv []string) error {
 	a, err := parse(argv, withServer(flagSet{
-		valued: set("name", "cwd", "env", "env-file", "max-restarts", "max-memory", "instances", "exec-mode", "stop-signal", "reload-signal", "restart-every", "restart-at", "health", "log-max-size", "log-keep"),
+		valued: set("name", "cwd", "env", "env-file", "max-restarts", "max-memory", "instances", "exec-mode", "increment-var", "listen-timeout", "stop-signal", "reload-signal", "restart-every", "restart-at", "health", "log-max-size", "log-keep"),
 		bools:  set("no-autorestart"),
 		alias:  map[string]string{"n": "name", "e": "env"},
 	}))
@@ -311,6 +316,11 @@ func cmdStart(argv []string) error {
 			continue
 		}
 		fmt.Printf("  %s %s %s\n", green("started"), bold(info.Name), dim(info.Spec.Command))
+		if info.Spec.ExecMode == proc.ExecCluster {
+			if ws, err := c.Preflight(info.Name, proc.ExecCluster, info.Spec.Workers()); err == nil {
+				printWarnings(ws)
+			}
+		}
 	}
 	// Give a process that dies immediately a moment to show it in the table.
 	time.Sleep(300 * time.Millisecond)
@@ -430,6 +440,14 @@ func buildSpec(a args) (proc.Spec, error) {
 			return spec, fmt.Errorf("--instances must be a number from 1 to %d (or max with --exec-mode cluster)", proc.MaxInstances)
 		}
 		spec.Instances = n
+	}
+	spec.IncrementVar = a.get("increment-var")
+	if v := a.get("listen-timeout"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil || d < time.Second || d > 10*time.Minute {
+			return spec, fmt.Errorf("--listen-timeout must be a duration from 1s to 10m, like 30s")
+		}
+		spec.ListenTimeoutMs = int(d.Milliseconds())
 	}
 	spec.MaxMemory = a.get("max-memory")
 	spec.RestartEvery = a.get("restart-every")

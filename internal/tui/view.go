@@ -684,6 +684,7 @@ func (m model) detailLines(r row, cw, n int) []string {
 		out = append(out, cpu, mem, "")
 	}
 	out = append(out, command, cwd)
+	out = append(out, m.workerLines(r)...)
 	out = append(out, m.domainLines(r)...)
 	if settings != "" {
 		out = append(out, settings)
@@ -1039,4 +1040,30 @@ func (m model) domainLines(r row) []string {
 		ps = append(ps, fmt.Sprintf(":%d", p))
 	}
 	return []string{label + sMuted.Render("none found, listens on "+strings.Join(ps, " ")+"; no nginx, Caddy or Apache site sends traffic there")}
+}
+
+// workerLines says how the workers of a cluster app are doing.
+func (m model) workerLines(r row) []string {
+	if r.v == nil || r.v.ExecMode != proc.ExecCluster {
+		return nil
+	}
+	if len(r.v.WorkerList) == 0 {
+		return []string{sMuted.Render("workers ") + fmt.Sprintf("%d, waiting for the launcher to report", r.v.Workers)}
+	}
+	var parts []string
+	for _, w := range r.v.WorkerList {
+		dot, label := sGreen.Render("●"), "listening"
+		switch w.State {
+		case "online", "starting":
+			dot, label = sYellow.Render("●"), "starting"
+		case "dead":
+			dot, label = sRed.Render("●"), "down"
+		}
+		mem := ""
+		if w.RSS > 0 {
+			mem = " " + fmtBytes(int64(w.RSS))
+		}
+		parts = append(parts, fmt.Sprintf("#%d %s %s%s", w.Slot, dot, label, mem))
+	}
+	return []string{sMuted.Render("workers ") + strings.Join(parts, sMuted.Render("  ·  "))}
 }

@@ -34,9 +34,20 @@ type starter interface {
 // deletes what is already there.
 type modeSetter interface {
 	SetMode(ctx context.Context, name, mode string, instances int) error
+	Scale(ctx context.Context, name string, n int, relative bool) error
+	Preflight(ctx context.Context, name, mode string, workers int) ([]proc.Warning, error)
 }
 
 type localBackend struct{ c *client.Client }
+
+func (l localBackend) Scale(_ context.Context, name string, n int, relative bool) error {
+	_, err := l.c.Scale(name, n, relative)
+	return err
+}
+
+func (l localBackend) Preflight(_ context.Context, name, mode string, workers int) ([]proc.Warning, error) {
+	return l.c.Preflight(name, mode, workers)
+}
 
 func (l localBackend) SetMode(_ context.Context, name, mode string, instances int) error {
 	_, err := l.c.SetMode(name, mode, instances)

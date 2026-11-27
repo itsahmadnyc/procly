@@ -42,6 +42,16 @@ type Spec struct {
 	// per CPU core.
 	ExecMode string `json:"exec_mode,omitempty" yaml:"exec_mode"`
 
+	// ListenTimeoutMs is how long a cluster worker may take to start listening
+	// (or send 'ready') before the next one is started and a reload moves on;
+	// 0 means 15 seconds. Raise it for apps that do a lot before they listen.
+	ListenTimeoutMs int `json:"listen_timeout_ms,omitempty" yaml:"listen_timeout_ms"`
+
+	// IncrementVar names an environment variable that is raised by the copy's
+	// index in each instance (PORT=3000 gives 3000, 3001, ...), as in PM2's
+	// increment_var, so separate copies of an app do not fight over one port.
+	IncrementVar string `json:"increment_var,omitempty" yaml:"increment_var"`
+
 	// Instances starts that many copies of the app, named name-1 .. name-N (see
 	// Expand). It is what a person writes; once expanded, each copy is its own
 	// spec with Group, Index and the total in Instances, which is what is saved.
@@ -160,6 +170,12 @@ func (s Spec) Validate() error {
 	}
 	if s.Instances < 0 || s.Instances > MaxInstances {
 		return fmt.Errorf("instances must be between 1 and %d, got %d", MaxInstances, s.Instances)
+	}
+	if s.ListenTimeoutMs < 0 || s.ListenTimeoutMs > 600000 {
+		return errors.New("listen_timeout_ms must be between 0 and 600000")
+	}
+	if s.IncrementVar != "" && !assignmentRe.MatchString(s.IncrementVar+"=") {
+		return fmt.Errorf("increment_var %q is not an environment variable name", s.IncrementVar)
 	}
 	if s.Group != "" && (s.Instances < 2 || s.Index < 0 || s.Index >= s.Instances) {
 		return fmt.Errorf("%s: an instance needs instances >= 2 and an index below it, got index %d of %d", s.Name, s.Index, s.Instances)

@@ -898,3 +898,12 @@ a.act-item:hover { background: var(--hover); }
 #view .table .hide-sm.icon-btn, .cell-actions .icon-btn { opacity: 1; visibility: visible; }
 @media (max-width: 900px) { .pstrip { grid-template-columns: repeat(2, minmax(0, 1fr)); } .pcell:nth-child(odd) { border-left: 0; } .pcell:nth-child(n+3) { border-top: 1px solid var(--hair); } }
 .warn-line { color: var(--amber) !important; }
+
+/* ---------- cluster workers ---------- */
+
+.scale-ctl { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; }
+.scale-ctl .btn.small { min-width: 28px; padding: 0 8px; }
+.workers-table td { height: 40px !important; }
+.pf-item { margin-top: 8px; padding: 8px 10px; border-radius: 8px; background: var(--amber-soft); font-size: 12.5px; }
+.pf-item b { font-weight: 600; }
+.pf-item .hintline { margin: 2px 0 0; }

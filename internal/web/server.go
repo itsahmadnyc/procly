@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -206,6 +207,8 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("POST /api/servers/{server}/save", s.private(s.csrf(s.withBackend(s.save))))
 	mux.HandleFunc("POST /api/servers/{server}/processes", s.private(s.csrf(s.withBackend(s.start))))
 	mux.HandleFunc("POST /api/servers/{server}/processes/{name}/mode", s.private(s.csrf(s.withBackend(s.mode))))
+	mux.HandleFunc("POST /api/servers/{server}/processes/{name}/scale", s.private(s.csrf(s.withBackend(s.scale))))
+	mux.HandleFunc("GET /api/servers/{server}/processes/{name}/preflight", s.private(s.withBackend(s.preflight)))
 
 	return secureHeaders(mux)
 }
@@ -610,4 +613,46 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+// scale changes the workers of a cluster app while it keeps running.
+func (s *server) scale(w http.ResponseWriter, r *http.Request, b backend, server string) {
+	ms, ok := b.(modeSetter)
+	if !ok || server != remote.LocalName {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "workers can only be changed on this server. Run procly scale on " + server + "."})
+		return
+	}
+	var req struct {
+		Workers  int  `json:"workers"`
+		Relative bool `json:"relative"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&req); err != nil || (!req.Relative && req.Workers < 1) || req.Workers < -proc.MaxInstances || req.Workers > proc.MaxInstances {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "workers must be a number from 1 to " + fmt.Sprint(proc.MaxInstances)})
+		return
+	}
+	if err := ms.Scale(r.Context(), r.PathValue("name"), req.Workers, req.Relative); err != nil {
+		writeError(w, server, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// preflight lists what the app's source says about running it as workers or
+// copies, before the person decides.
+func (s *server) preflight(w http.ResponseWriter, r *http.Request, b backend, server string) {
+	ms, ok := b.(modeSetter)
+	if !ok || server != remote.LocalName {
+		writeJSON(w, http.StatusOK, []proc.Warning{})
+		return
+	}
+	workers, _ := strconv.Atoi(r.URL.Query().Get("workers"))
+	ws, err := ms.Preflight(r.Context(), r.PathValue("name"), r.URL.Query().Get("mode"), workers)
+	if err != nil {
+		writeError(w, server, err)
+		return
+	}
+	if ws == nil {
+		ws = []proc.Warning{}
+	}
+	writeJSON(w, http.StatusOK, ws)
 }

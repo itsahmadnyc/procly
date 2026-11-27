@@ -57,6 +57,10 @@ type Info struct {
 	// EnvFileKeys are the variable names the env files gave at the last start
 	// (names only, never values).
 	EnvFileKeys []string `json:"env_file_keys,omitempty"`
+
+	// Cluster is what the launcher reports about the workers of a cluster-mode
+	// app that is running; nil otherwise.
+	Cluster *ClusterStatus `json:"cluster,omitempty"`
 }
 
 // Process supervises one command. All fields are guarded by mu.
@@ -314,9 +318,20 @@ func (p *Process) Stop() {
 	}
 	p.stopping = true
 	pid, exited, timeout, name, sig := p.pid, p.exited, p.spec.killTimeout(), p.spec.Name, p.spec.stopSignal()
+	target := -pid
+	if p.spec.isCluster() {
+		// The launcher stops its workers itself, one by one, and exits when they
+		// are gone. A signal to the whole group would kill the workers while the
+		// launcher still thinks it is running and replaces them. It gets longer
+		// than a plain process, since its workers close their connections.
+		target = pid
+		if p.spec.KillTimeoutMs == 0 {
+			timeout = max(timeout, 12*time.Second)
+		}
+	}
 	p.mu.Unlock()
 
-	_ = syscall.Kill(-pid, sig)
+	_ = syscall.Kill(target, sig)
 	select {
 	case <-exited:
 	case <-time.After(timeout):
@@ -378,6 +393,11 @@ func (p *Process) infoLocked() Info {
 	}
 	if p.cmd != nil || p.status == StatusOrphaned {
 		info.StartedAt = p.startedAt
+	}
+	if p.spec.isCluster() && p.pid > 0 && p.cmd != nil {
+		if st, ok := readClusterStatus(clusterStatusPath(p.logDir, p.spec.Name), p.pid); ok {
+			info.Cluster = &st
+		}
 	}
 	return info
 }

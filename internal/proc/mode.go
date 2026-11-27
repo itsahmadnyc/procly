@@ -3,7 +3,10 @@ package proc
 import (
 	"errors"
 	"fmt"
+	"net"
 	"sort"
+	"strconv"
+	"time"
 )
 
 // SetMode changes how an app runs, keeping its command, environment and
@@ -98,18 +101,35 @@ func (m *Manager) SetMode(target, mode string, workers int) ([]Info, error) {
 		wasUp = wasUp || p.running()
 		p.mu.Unlock()
 	}
+	// The ports the old setup holds: the new one must not start before they are
+	// free, or it dies on "address already in use" and the switch looks failed.
+	var held []int
+	if wasUp {
+		pn := m.PortNumbers()
+		for _, sp := range specs {
+			held = append(held, pn[sp.Name]...)
+		}
+	}
 	each(old, func(p *Process) error { p.Stop(); return nil })
+	waitPortsFree(held, 10*time.Second)
 
 	// A single process keeps its place (and id) when only its settings change.
 	if len(specs) == 1 && len(next) == 1 && specs[0].Name == next[0].Name {
+		putBack := func(err error) error {
+			m.Stop(specs[0].Name)
+			if _, rerr := m.restartWith(old[0], specs[0], wasUp); rerr != nil {
+				return fmt.Errorf("%w; and putting it back failed: %v", err, rerr)
+			}
+			return fmt.Errorf("%w; the previous setup was put back", err)
+		}
 		in, err := m.restartWith(old[0], next[0], wasUp)
 		if err != nil {
-			if _, rerr := m.restartWith(old[0], specs[0], wasUp); rerr != nil {
-				err = fmt.Errorf("%w; and putting it back failed: %v", err, rerr)
-			} else {
-				err = fmt.Errorf("%w; the previous setup was put back", err)
+			return nil, putBack(err)
+		}
+		if wasUp && !SkipSettle {
+			if err := m.settle(next[0].Name, next[0]); err != nil {
+				return nil, putBack(fmt.Errorf("the new %s setup did not work: %w", modeWord(next[0]), err))
 			}
-			return nil, err
 		}
 		return []Info{in}, nil
 	}
@@ -129,6 +149,14 @@ func (m *Manager) SetMode(target, mode string, workers int) ([]Info, error) {
 			break
 		}
 		started = append(started, in)
+	}
+	if err == nil && wasUp && !SkipSettle {
+		for _, s := range next {
+			if err = m.settle(s.Name, s); err != nil {
+				err = fmt.Errorf("the new %s setup did not work: %w", modeWord(s), err)
+				break
+			}
+		}
 	}
 	if err != nil { // put the old setup back
 		for _, s := range next {
@@ -175,4 +203,31 @@ func sameSetup(have, next []Spec) bool {
 		}
 	}
 	return true
+}
+
+// SkipSettle turns off the wait after a switch that checks the new setup works
+// (only tests that do not care set it).
+var SkipSettle bool
+
+func modeWord(s Spec) string {
+	if s.isCluster() {
+		return "cluster"
+	}
+	return "fork"
+}
+
+// waitPortsFree waits until nothing listens on the ports any more, or the time
+// is up.
+func waitPortsFree(ports []int, d time.Duration) {
+	deadline := time.Now().Add(d)
+	for _, p := range ports {
+		for time.Now().Before(deadline) {
+			l, err := net.Listen("tcp", ":"+strconv.Itoa(p))
+			if err == nil {
+				l.Close()
+				break
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
 }

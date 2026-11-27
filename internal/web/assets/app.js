@@ -484,6 +484,7 @@ const EVENT = {
   memory: { ic: "alert", tone: "warn", title: () => "Restarted: used too much memory" },
   reloaded: { ic: "restart", tone: "good", title: () => "Reloaded" },
   scheduled: { ic: "clock", tone: "", title: (e) => "Scheduled restart" },
+  scaled: { ic: "pulse", tone: "", title: () => "Workers changed" },
   started: { ic: "play", tone: "good", title: () => "Started" },
   stopped: { ic: "stop", tone: "", title: () => "Stopped" },
   orphaned: { ic: "alert", tone: "warn", title: () => "Found running after its daemon died" },
@@ -681,12 +682,21 @@ function changeMode(server, p) {
       const workers = h("input", { id: "fd-workers", type: "number", min: "0", max: "64", value: String(p.instances > 1 ? p.instances : 2) });
       inputs.workers = workers;
       const field = h("div", { class: "field" }, h("label", { for: "fd-workers", text: "Workers" }), workers, h("p", { class: "hintline", text: "0 means one worker per CPU." }));
-      const paint = () => { for (const [m, b] of Object.entries(opts)) b.setAttribute("aria-pressed", String(m === mode)); field.hidden = mode !== "cluster"; warn.hidden = mode !== "cluster"; };
+      const paint = () => { for (const [m, b] of Object.entries(opts)) b.setAttribute("aria-pressed", String(m === mode)); field.hidden = mode !== "cluster"; warn.hidden = mode !== "cluster"; if (mode === "cluster") loadPf(); };
       for (const [m, name, sub] of [["fork", "Fork", "one process, any command"], ["cluster", "Cluster", "Node only, shares ports, rolling reload"]]) {
         opts[m] = h("button", { type: "button", class: "mode-opt", onclick: () => { mode = m; paint(); } }, h("b", { text: name }), h("span", { text: sub }));
       }
-      const warn = h("p", { class: "hintline warn-line", text: "Every worker runs your app's start-up code. If it syncs or migrates a database when it starts, or does heavy work at boot, that happens once per worker and can pile up CPU. Try 2 workers first and watch the CPU." });
+      const warn = h("div", { class: "pf" }, h("p", { class: "hintline warn-line", text: "Every worker runs your app's start-up code, so anything it does at boot happens once per worker. procly starts them one at a time, tells each its number in NODE_APP_INSTANCE, and puts the old setup back if the new one does not work. Try 2 workers first and watch the CPU." }), h("div", { class: "pf-list" }));
       wrap.append(h("div", { class: "mode-opts" }, opts.fork, opts.cluster), field, warn);
+      let pfLoaded = false;
+      const loadPf = async () => {
+        if (pfLoaded) return;
+        pfLoaded = true;
+        try {
+          const ws = await api("GET", `${srvPath(server)}/processes/${encodeURIComponent(p.name)}/preflight?mode=cluster&workers=2`);
+          warn.querySelector(".pf-list").replaceChildren(...ws.map((w) => h("div", { class: "pf-item" }, h("b", { text: w.text }), w.file && h("span", { class: "mono muted", text: " " + w.file }), w.advice && h("p", { class: "hintline", text: w.advice }))));
+        } catch { /* the general note is enough */ }
+      };
       paint();
       return wrap;
     },
@@ -1615,14 +1625,54 @@ function callout(tone, ic, title, text, detail) {
 
 const TAB_PAGES = {};
 
+// The workers of a cluster app, one row each, with a way to add or remove one
+// while the others keep serving.
+function workersCard(box, server, p) {
+  if (p.exec_mode !== "cluster") { box.hidden = true; return; }
+  box.hidden = false;
+  const list = p.worker_list || [];
+  const stateOf = { listening: ["good", "listening"], online: ["warn", "starting"], starting: ["warn", "starting"], dead: ["bad", "down"] };
+  const tbl = h("table", { class: "table workers-table" },
+    h("thead", {}, h("tr", {}, h("th", { text: "Worker" }), h("th", { text: "State" }), h("th", { class: "r", text: "PID" }), h("th", { class: "r", text: "Memory" }), h("th", { class: "r", text: "Uptime" }), h("th", { class: "r", text: "Replaced" }))),
+    h("tbody", {}, list.length ? list.map((w) => {
+      const [tone, label] = stateOf[w.state] || ["", w.state];
+      return h("tr", {}, h("td", {}, h("b", { text: "#" + w.slot })), h("td", {}, h("span", { class: "badge " + tone, text: label })),
+        h("td", { class: "num r", text: w.pid || "–" }), h("td", { class: "num r", text: w.rss ? fmtBytes(w.rss) : "–" }),
+        h("td", { class: "num r", text: w.pid && w.started ? fmtUptime(Date.now() - w.started) : "–" }), h("td", { class: "num r" + (w.restarts ? " warn" : " dim"), text: w.restarts }));
+    }) : [h("tr", {}, h("td", { colspan: "6", class: "muted", text: p.pid ? "Waiting for the launcher to report its workers…" : "Not running." }))]));
+  const n = p.workers || list.length || 1;
+  const step = (d) => h("button", { class: "btn small", type: "button", disabled: S.busy.has(key(server, p.name)) || n + d < 1 || n + d > 64, title: d > 0 ? "Add a worker" : "Remove a worker", "aria-label": d > 0 ? "Add a worker" : "Remove a worker", onclick: () => scaleWorkers(server, p.name, d) }, d > 0 ? "+" : "−");
+  const ctl = server === "local" ? h("span", { class: "scale-ctl" }, step(-1), h("b", { text: plural(n, "worker") }), step(1)) : null;
+  box.replaceChildren(sectionHead("Workers", p.workers_up != null ? `${p.workers_up || 0} of ${n} up` : null, ctl), h("div", { class: "card" }, tbl),
+    h("p", { class: "hintline muted", text: p.max_memory ? `The memory limit of ${fmtBytes(p.max_memory)} applies to each worker. A worker over it is replaced without a gap.` : "Workers start one at a time, and each knows its number in NODE_APP_INSTANCE." }));
+}
+
+async function scaleWorkers(server, name, delta) {
+  const p = fresh(server, name);
+  if (!p) return;
+  const from = p.workers || 1, to = from + delta;
+  const yes = await confirmDialog({ ic: "processes", tone: "", title: `Run ${name} with ${plural(to, "worker")}?`,
+    text: delta > 0 ? `procly starts ${plural(delta, "more worker")}, one at a time. The ${plural(from, "worker")} already running keep serving.` : `procly retires ${plural(-delta, "worker")}: each stops taking new connections and finishes what it is doing. The others keep serving.`,
+    ok: delta > 0 ? "Add" : "Remove" });
+  if (!yes) return;
+  try {
+    await api("POST", `${srvPath(server)}/processes/${encodeURIComponent(name)}/scale`, { workers: delta, relative: true });
+    toast(`${name} now has ${plural(to, "worker")}. Save the list to keep it after a reboot.`);
+    await loadProcs(server); refresh();
+  } catch (err) {
+    if (!handleErr(err)) toast(err.message, true);
+  }
+}
+
 TAB_PAGES.overview = (srv, name) => {
   let refs;
   return {
     mount(root) {
-      refs = { cpu: chartCard("CPU"), mem: chartCard("Memory"), up: stat("Uptime"), rs: stat("Restarts"), health: stat("Health"), domain: stat("Domain"), facts: h("dl", { class: "facts" }), events: h("div") };
+      refs = { cpu: chartCard("CPU"), mem: chartCard("Memory"), up: stat("Uptime"), rs: stat("Restarts"), health: stat("Health"), domain: stat("Domain"), facts: h("dl", { class: "facts" }), events: h("div"), workers: h("div", { class: "section", hidden: true }) };
       root.append(
         h("dl", { class: "stats under" }, refs.up, refs.rs, refs.health, refs.domain),
         refs.charts = h("div", { class: "charts" }, refs.cpu, refs.mem),
+        refs.workers,
         h("div", { class: "cols section" },
           h("div", {}, sectionHead("Details"), h("div", { class: "card" }, refs.facts)),
           h("div", {}, sectionHead("Recent events", null, h("a", { class: "more", href: `#/s/${encodeURIComponent(srv())}/p/${encodeURIComponent(name())}/events` }, "All events", icon("chevronRight"))), refs.events)));
@@ -1648,6 +1698,8 @@ TAB_PAGES.overview = (srv, name) => {
       else if (!dm.ports.length) setStat(refs.domain, "no port", p.pid ? "not listening" : "not running");
       else setStat(refs.domain, "none found", "not connected");
 
+      workersCard(refs.workers, srv(), p);
+
       const facts = h("dl");
       const add = (k, v, cls) => facts.append(h("dt", { text: k }), v instanceof Node ? h("dd", { class: cls || "" }, v) : h("dd", { class: cls || "", text: v, title: v }));
       add("Command", p.command);
@@ -1658,7 +1710,7 @@ TAB_PAGES.overview = (srv, name) => {
       add("Autorestart", p.autorestart ? `on, gives up after ${p.max_restarts} quick crashes` : "off");
       if (p.health_check) add("Health check", `${p.health || "not running"} · ${p.health_check}`, p.health === "healthy" ? "good" : p.health === "unhealthy" ? "bad" : "");
       if (p.restart_every || p.restart_at) add("Scheduled restart", [p.restart_every && `every ${p.restart_every} after a start`, p.restart_at && `every day at ${p.restart_at} (server time)`].filter(Boolean).join(" and "));
-      if (p.max_memory) add("Memory limit", `restarts above ${fmtBytes(p.max_memory)}, counting its children`);
+      if (p.max_memory) add("Memory limit", p.exec_mode === "cluster" ? `each worker is replaced above ${fmtBytes(p.max_memory)}` : `restarts above ${fmtBytes(p.max_memory)}, counting its children`);
       add("Environment", p.env_keys.length ? h("div", { class: "chips" }, p.env_keys.map((k) => h("span", { class: "badge", text: k }))) : h("span", { class: "muted", text: "none set" }));
       add("Logs", p.out_log || "–");
       fill(refs.facts, ...facts.childNodes);

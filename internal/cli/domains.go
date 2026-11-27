@@ -223,6 +223,10 @@ func cmdMode(argv []string) error {
 		what = fmt.Sprintf("a cluster of %d %s", cur.Spec.Workers(), plural(cur.Spec.Workers(), "worker", "workers"))
 	}
 	fmt.Printf("  %s runs as %s. Switching it to %s restarts it (it is stopped, then started again).\n", bold(a.pos[0]), what, a.pos[1])
+	if ws, werr := c.Preflight(a.pos[0], a.pos[1], n); werr == nil {
+		printWarnings(ws)
+	}
+	fmt.Println(dim("  procly then watches the new setup for a few seconds, and puts the old one back if it does not work."))
 	if !a.bools["yes"] && !confirmTerminal("  Go on?") {
 		fmt.Println(dim("  Nothing changed."))
 		return nil
@@ -248,4 +252,63 @@ func confirmTerminal(q string) bool {
 	fmt.Scanln(&ans)
 	ans = strings.ToLower(strings.TrimSpace(ans))
 	return ans == "y" || ans == "yes"
+}
+
+// printWarnings shows what procly found in an app's source that matters when
+// it runs more than once.
+func printWarnings(ws []proc.Warning) {
+	for _, w := range ws {
+		where := ""
+		if w.File != "" {
+			where = dim(" (" + w.File + ")")
+		}
+		fmt.Printf("  %s %s%s\n", yellow("!"), w.Text, where)
+		if w.Advice != "" {
+			fmt.Printf("    %s\n", dim(w.Advice))
+		}
+	}
+}
+
+// cmdScale changes the workers of a cluster app while it keeps running.
+func cmdScale(argv []string) error {
+	a, err := parse(argv, flagSet{bools: set("yes", "y"), alias: map[string]string{"y": "yes"}})
+	if err != nil {
+		return err
+	}
+	if len(a.pos) != 2 {
+		return errors.New("usage: procly scale <name> <n|+n|-n> [--yes]")
+	}
+	word := a.pos[1]
+	relative := strings.HasPrefix(word, "+") || strings.HasPrefix(word, "-")
+	n, err := strconv.Atoi(strings.TrimPrefix(word, "+"))
+	if err != nil {
+		return errors.New("usage: procly scale <name> <n|+n|-n>: a number of workers, or +2 / -1 to change it")
+	}
+	c, ok := connectOrRecover()
+	if !ok {
+		return errors.New("daemon is not running")
+	}
+	cur, err := c.Get(a.pos[0])
+	if err != nil {
+		return err
+	}
+	if cur.Spec.ExecMode != proc.ExecCluster {
+		return fmt.Errorf("%s does not run in cluster mode; scale changes the workers of a cluster app (procly mode %s cluster)", a.pos[0], a.pos[0])
+	}
+	to := n
+	if relative {
+		to = cur.Spec.Workers() + n
+	}
+	fmt.Printf("  %s has %d %s; scaling it to %d. The running workers keep serving while the others start or stop.\n", bold(a.pos[0]), cur.Spec.Workers(), plural(cur.Spec.Workers(), "worker", "workers"), to)
+	if !a.bools["yes"] && !confirmTerminal("  Go on?") {
+		fmt.Println(dim("  Nothing changed."))
+		return nil
+	}
+	in, err := c.Scale(a.pos[0], n, relative)
+	if err != nil {
+		return err
+	}
+	printList(os.Stdout, proc.NewViews([]proc.Info{in}), "")
+	fmt.Println(dim("  procly save keeps this after a reboot."))
+	return nil
 }

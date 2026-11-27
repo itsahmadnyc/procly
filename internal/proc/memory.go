@@ -44,7 +44,9 @@ func (m *Manager) checkMemory() {
 	m.mu.Lock()
 	for _, p := range m.procs {
 		p.mu.Lock()
-		if limit, _ := p.spec.maxMemoryBytes(); limit > 0 && p.cmd != nil && !p.stopping && p.pid > 0 {
+		// A cluster app's limit is per worker and the launcher enforces it:
+		// counting the whole group here would restart every worker at once.
+		if limit, _ := p.spec.maxMemoryBytes(); limit > 0 && !p.spec.isCluster() && p.cmd != nil && !p.stopping && p.pid > 0 {
 			list = append(list, watched{p, p.pid, limit})
 			pids = append(pids, p.pid)
 		}

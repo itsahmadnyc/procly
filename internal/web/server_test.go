@@ -67,6 +67,16 @@ func (f *fakeBackend) Logs(ctx context.Context, name string, send func([]logtail
 	return nil
 }
 
+func (f *fakeBackend) Scale(_ context.Context, name string, n int, relative bool) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.actions = append(f.actions, fmt.Sprintf("scale %s %d %v", name, n, relative))
+	return nil
+}
+func (f *fakeBackend) Preflight(_ context.Context, name, mode string, workers int) ([]proc.Warning, error) {
+	return []proc.Warning{{Kind: "startup", Text: "It syncs the database at start."}}, nil
+}
+
 func (f *fakeBackend) SetMode(_ context.Context, name, mode string, instances int) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

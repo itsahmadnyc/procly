@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
+	"strings"
 )
 
 // MaxInstances bounds `instances`: more copies than this is almost certainly a typo.
@@ -34,12 +35,27 @@ func Expand(s Spec) ([]Spec, error) {
 	if err := base.Validate(); err != nil {
 		return nil, err
 	}
+	// Copies that all get the same fixed port cannot run: all but one die on
+	// "address already in use". Say so now, not after the first crash.
+	var portBase int
+	if s.IncrementVar != "" {
+		n, err := strconv.Atoi(strings.TrimSpace(s.Env[s.IncrementVar]))
+		if err != nil {
+			return nil, fmt.Errorf("%s: increment_var %s needs a number in env (%s=3000 gives 3000, 3001, ...)", s.Name, s.IncrementVar, s.IncrementVar)
+		}
+		portBase = n
+	} else if v, ok := s.Env["PORT"]; ok && strings.TrimSpace(v) != "" && !knowsItsInstance(s.Cwd) {
+		return nil, fmt.Errorf("%s: %d separate copies would all listen on PORT=%s, and all but one would fail. Give each its own port with increment_var: PORT, or use cluster mode, which lets workers share one port", s.Name, s.Instances, v)
+	}
 	out := make([]Spec, s.Instances)
 	for i := range out {
 		c := s
 		c.Name = s.Name + "-" + strconv.Itoa(i+1)
 		c.Group, c.Index = s.Name, i
 		c.Env = copyMap(s.Env)
+		if s.IncrementVar != "" {
+			c.Env[s.IncrementVar] = strconv.Itoa(portBase + i)
+		}
 		c.EnvFile = append(StringList(nil), s.EnvFile...)
 		if s.AutoRestart != nil {
 			v := *s.AutoRestart
